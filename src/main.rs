@@ -1,7 +1,8 @@
 mod parser;
 
-use std::io::{self, Read, Stdout, Write};
+use std::io::{self, BufRead, Read, Stdout, Write};
 use std::cmp;
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::ops::Add;
 use std::process;
@@ -62,7 +63,8 @@ impl Shell {
             term: Term::new(),
             ctx: parser::vars::Context {
                 scopes: Vec::new(),
-                parent_context: None,
+                fd: Vec::new(),
+                exports: HashMap::new()
             },
         };
     }
@@ -70,17 +72,24 @@ impl Shell {
 
 fn main() {
     loop {
-        let mut shell = editor();
+        let mut shell = collect();
         shell.term.input += "\n";
         parser::exec(&mut shell.term.input.as_bytes(), shell.ctx);
     }
+}
+
+fn collect() -> Shell {
+    let mut shell = Shell::new();
+    let stdin = std::io::stdin();
+    let v = stdin.lock().lines().next().unwrap().unwrap();
+    shell.term.input = v;
+    shell
 }
 
 fn editor() -> Shell {
     let stdin = io::stdin();
     let mut stdout = io::stdout().into_raw_mode().unwrap();
     let mut shell = Shell::new();
-    let mut should_execute = true;
     for c in stdin.keys() {
         let c = c.unwrap();
         match c {
@@ -134,6 +143,6 @@ fn editor() -> Shell {
         shell.term.print(&mut stdout);
         stdout.flush().unwrap();
     }
-    stdout.suspend_raw_mode();
+    stdout.suspend_raw_mode().unwrap();
     shell
 }

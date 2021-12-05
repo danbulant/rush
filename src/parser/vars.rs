@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::ops::{Add, Deref};
-use crate::parser::ast::FunctionExpression;
+use crate::parser::ast::FunctionDefinitionExpression;
 use crate::parser::escape;
 
 #[derive(Debug)]
@@ -55,19 +55,22 @@ impl Variable {
 pub struct Scope {
     pub active: bool,
     pub vars: HashMap<String, Variable>,
-    pub func: HashMap<String, FunctionExpression>
+    pub func: HashMap<String, FunctionDefinitionExpression>
 }
 
 #[derive(Debug)]
 pub struct Context {
     pub scopes: Vec<Scope>,
-    pub exports: HashMap<String, String>
+    pub exports: HashMap<String, String>,
+    pub fd: Vec<usize>
 }
 
 impl Context {
     pub fn new() -> Context {
         Context {
-            scopes: Vec::new()
+            scopes: Vec::new(),
+            exports: HashMap::new(),
+            fd: Vec::new()
         }
     }
     pub fn pop_scope(self: &mut Self) -> Option<Scope> {
@@ -99,5 +102,24 @@ impl Context {
     pub fn set_var(&mut self, key: String, val: Variable) {
         let mut vars = &mut self.scopes.last_mut().unwrap().vars;
         vars.insert(key, val);
+    }
+
+    pub fn get_func(self: &mut Self, key: &str) -> Option<&mut FunctionDefinitionExpression> {
+        for mut scope in self.scopes.iter_mut().rev() {
+            let mut funcs = &mut scope.func;
+            let val = funcs.get_mut(key);
+            match val {
+                None => {},
+                Some(val) => {
+                    return Some(val);
+                }
+            }
+        }
+        None
+    }
+
+    pub fn set_func(&mut self, key: String, val: FunctionDefinitionExpression) {
+        let mut func = &mut self.scopes.last_mut().unwrap().func;
+        func.insert(key, val);
     }
 }
