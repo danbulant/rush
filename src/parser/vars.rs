@@ -1,7 +1,5 @@
 use std::collections::HashMap;
-use std::ops::{Add, Deref};
 use crate::parser::ast::FunctionDefinitionExpression;
-use crate::parser::escape;
 
 #[derive(Debug)]
 pub enum Variable {
@@ -30,7 +28,7 @@ impl Variable {
             Variable::U128(num) => num.to_string(),
             Variable::F32(num) => num.to_string(),
             Variable::F64(num) => num.to_string(),
-            Variable::HMap(map) => {
+            Variable::HMap(_map) => {
                 String::from("[Object object]")
             },
             Variable::Array(vars) => {

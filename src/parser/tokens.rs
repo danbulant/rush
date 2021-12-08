@@ -1,6 +1,4 @@
-use std::fmt::format;
 use std::io;
-use crate::parser::vars;
 
 #[derive(Debug)]
 pub enum Tokens {
@@ -12,7 +10,8 @@ pub enum Tokens {
     ArrayVariable(String, bool),
     ArrayFunction(String),
     StringFunction(String),
-    FunctionCallEnd,
+    ParenthesisStart,
+    ParenthesisEnd,
     CommandEnd(char),
     If,
     Else,
@@ -21,10 +20,12 @@ pub enum Tokens {
     Function,
     End,
     SubStart,
-    SubEnd,
     RedirectInto,
     FileRead,
     FileWrite,
+    And,
+    Or,
+    JobCommandEnd
 }
 
 impl Tokens {
@@ -38,7 +39,8 @@ impl Tokens {
             "else" => Tokens::Else,
             "end" => Tokens::End,
             "$(" => Tokens::SubStart,
-            ")" => Tokens::SubEnd,
+            "(" => Tokens::ParenthesisStart,
+            ")" => Tokens::ParenthesisEnd,
             ">" => Tokens::FileWrite,
             "<" => Tokens::FileRead,
             "|" => Tokens::RedirectInto,
@@ -59,7 +61,6 @@ impl Tokens {
             Tokens::StringFunction(str) => format!("${}", str.as_str()),
             Tokens::CommandEnd(str) => str.to_string(),
             Tokens::ExportSet => "=".to_string(),
-            Tokens::FunctionCallEnd => ")".to_string(),
             Tokens::Function => "function".to_string(),
             Tokens::If => "if".to_string(),
             Tokens::Else => "else".to_string(),
@@ -67,10 +68,14 @@ impl Tokens {
             Tokens::For => "for".to_string(),
             Tokens::End => "end".to_string(),
             Tokens::SubStart => "$(".to_string(),
-            Tokens::SubEnd => ")".to_string(),
+            Tokens::ParenthesisStart => "(".to_string(),
+            Tokens::ParenthesisEnd => ")".to_string(),
             Tokens::RedirectInto => "|".to_string(),
             Tokens::FileRead => "<".to_string(),
-            Tokens::FileWrite => ">".to_string()
+            Tokens::FileWrite => ">".to_string(),
+            Tokens::And => "&&".to_string(),
+            Tokens::Or => "||".to_string(),
+            Tokens::JobCommandEnd => "&".to_string()
         }
     }
 }
@@ -84,7 +89,7 @@ fn read_var_ahead(i: usize, text: &String) -> (usize, Tokens) {
         x += 1;
         let letter: char = text.chars().nth(x).unwrap();
         match letter {
-            'a'...'z' | 'A'...'Z' | '0'...'9' | ':' => {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | ':' | '_' => {
                 buf.push(letter.clone());
             }
             '}' => {
@@ -93,7 +98,7 @@ fn read_var_ahead(i: usize, text: &String) -> (usize, Tokens) {
                 }
                 break;
             }
-            _ => { if !parens_mode { break } }
+            _ => { if !parens_mode { break } else { panic!("Invalid variable name") } }
         }
     }
     let token = match text.chars().nth(i).unwrap() {
@@ -174,15 +179,23 @@ pub fn tokenize(reader: &mut dyn std::io::BufRead) -> io::Result<Vec<Tokens>> {
                 skipper = x - i - 1;
                 buf_add = false;
             },
-            ')' => if !quote_active && !double_quote_active {
+            '(' => if !quote_active && !double_quote_active && !escape_active {
                 if buf.len() > 0 {
                     tokens.push(Tokens::Literal(buf));
                     buf = String::new();
                 }
-                tokens.push(Tokens::FunctionCallEnd);
+                tokens.push(Tokens::ParenthesisStart);
+                buf_add = false;
+            }
+            ')' => if !quote_active && !double_quote_active && !escape_active {
+                if buf.len() > 0 {
+                    tokens.push(Tokens::Literal(buf));
+                    buf = String::new();
+                }
+                tokens.push(Tokens::ParenthesisEnd);
                 buf_add = false;
             },
-            'i' => if !quote_active && !double_quote_active {
+            'i' => if !quote_active && !double_quote_active && !escape_active {
                 if check_keyword(&text, i, "if") {
                     if buf.len() > 0 {
                         tokens.push(Tokens::Literal(buf));
@@ -193,7 +206,7 @@ pub fn tokenize(reader: &mut dyn std::io::BufRead) -> io::Result<Vec<Tokens>> {
                     buf_add = false;
                 }
             },
-            'e' => if !quote_active && !double_quote_active {
+            'e' => if !quote_active && !double_quote_active && !escape_active {
                 if check_keyword(&text, i, "else") {
                     if buf.len() > 0 {
                         tokens.push(Tokens::Literal(buf));
@@ -212,7 +225,18 @@ pub fn tokenize(reader: &mut dyn std::io::BufRead) -> io::Result<Vec<Tokens>> {
                     buf_add = false;
                 }
             },
-            'w' => if !quote_active && !double_quote_active {
+            'l' => if !quote_active && !double_quote_active && !escape_active {
+                if check_keyword(&text, i, "let") {
+                    if buf.len() > 0 {
+                        tokens.push(Tokens::Literal(buf));
+                        buf = String::new();
+                    }
+                    skipper = 3;
+                    tokens.push(Tokens::Let);
+                    buf_add = false;
+                }
+            },
+            'w' => if !quote_active && !double_quote_active && !escape_active {
                 if check_keyword(&text, i, "while") {
                     if buf.len() > 0 {
                         tokens.push(Tokens::Literal(buf));
@@ -223,7 +247,7 @@ pub fn tokenize(reader: &mut dyn std::io::BufRead) -> io::Result<Vec<Tokens>> {
                     buf_add = false;
                 }
             },
-            'f' => if !quote_active && !double_quote_active {
+            'f' => if !quote_active && !double_quote_active && !escape_active {
                 if check_keyword(&text, i, "for") {
                     if buf.len() > 0 {
                         tokens.push(Tokens::Literal(buf));
@@ -239,7 +263,25 @@ pub fn tokenize(reader: &mut dyn std::io::BufRead) -> io::Result<Vec<Tokens>> {
                     tokens.push(Tokens::Literal(buf));
                     buf = String::new();
                 }
-                tokens.push(Tokens::RedirectInto);
+                if check_keyword(&text, i, "||") {
+                    skipper = 1;
+                    tokens.push(Tokens::Or);
+                } else {
+                    tokens.push(Tokens::RedirectInto);
+                }
+                buf_add = false;
+            },
+            '&' => if !escape_active && !quote_active && !double_quote_active {
+                if buf.len() > 0 {
+                    tokens.push(Tokens::Literal(buf));
+                    buf = String::new();
+                }
+                if check_keyword(&text, i, "&&") {
+                    skipper = 1;
+                    tokens.push(Tokens::And);
+                } else {
+                    tokens.push(Tokens::JobCommandEnd);
+                }
                 buf_add = false;
             },
             '>' => if !escape_active && !quote_active && !double_quote_active {

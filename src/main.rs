@@ -1,17 +1,16 @@
 mod parser;
 
-use std::io::{self, BufRead, Read, Stdout, Write};
+use std::io::{self, BufRead, Stdout, Write};
 use std::cmp;
 use std::collections::HashMap;
 use std::convert::TryInto;
-use std::ops::Add;
 use std::process;
 
 use termion::raw::{IntoRawMode, RawTerminal};
 use termion::input::TermRead;
-use termion::cursor::{self, DetectCursorPos};
+use termion::cursor::{DetectCursorPos};
 use termion::event::*;
-use termion::input::{MouseTerminal};
+// use termion::input::{MouseTerminal};
 
 struct Term {
     input: String,
@@ -72,6 +71,8 @@ impl Shell {
 
 fn main() {
     loop {
+        print!("$: ");
+        io::stdout().flush();
         let mut shell = collect();
         shell.term.input += "\n";
         parser::exec(&mut shell.term.input.as_bytes(), shell.ctx);
