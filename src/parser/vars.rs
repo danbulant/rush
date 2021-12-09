@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use crate::parser::ast::FunctionDefinitionExpression;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Variable {
     String(String),
     I32(i32),
@@ -19,7 +19,9 @@ pub enum Variable {
 impl Variable {
     pub fn to_string(self: &Self) -> String {
         match self {
-            Variable::String(var) => String::from(var),
+            Variable::String(var) => {
+                var.clone()
+            },
             Variable::I32(num) => num.to_string(),
             Variable::I64(num) => num.to_string(),
             Variable::I128(num) => num.to_string(),
@@ -32,10 +34,16 @@ impl Variable {
                 String::from("[Object object]")
             },
             Variable::Array(vars) => {
+                let len = vars.len();
+                if len == 1 { return vars.get(0).unwrap().to_string(); }
                 let mut str = String::new();
+                let mut i = 0;
                 for var in vars {
                     str += &*var.clone().to_string();
-                    str += " ";
+                    if i < len - 1 {
+                        str += " ";
+                    }
+                    i += 1;
                 }
                 str
             }

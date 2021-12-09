@@ -67,24 +67,24 @@ impl Shell {
             },
         };
     }
-}
 
-fn main() {
-    loop {
-        print!("$: ");
-        io::stdout().flush();
-        let mut shell = collect();
-        shell.term.input += "\n";
-        parser::exec(&mut shell.term.input.as_bytes(), shell.ctx);
+    fn collect(&mut self) {
+        let stdin = std::io::stdin();
+        let v = stdin.lock().lines().next().unwrap().unwrap();
+        self.term.input = v;
     }
 }
 
-fn collect() -> Shell {
+fn main() {
     let mut shell = Shell::new();
-    let stdin = std::io::stdin();
-    let v = stdin.lock().lines().next().unwrap().unwrap();
-    shell.term.input = v;
-    shell
+    shell.ctx.add_scope(true);
+    loop {
+        print!("$: ");
+        io::stdout().flush();
+        shell.collect();
+        shell.term.input += "\n";
+        parser::exec(&mut shell.term.input.as_bytes(), &mut shell.ctx);
+    }
 }
 
 fn editor() -> Shell {

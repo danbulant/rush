@@ -58,7 +58,6 @@ pub enum Value {
     ArrayFunction(DefinedFunction),
     StringFunction(DefinedFunction),
     Expressions(Vec<Expression>),
-    Expression(Expression),
     Values(Vec<Value>)
 }
 
@@ -119,7 +118,6 @@ impl Tree {
     fn parse_call(&mut self, end: usize) -> Expression {
         let mut values: Vec<CommandValue> = Vec::new();
         let mut buf: Vec<Value> = Vec::new();
-        dbg!("call parse");
         let mut token = self.get_current_token();
         loop {
             if matches!(token, Tokens::Space) {
@@ -130,7 +128,6 @@ impl Tree {
                 if self.i >= end - 1 { break }
                 self.i += 1;
                 token = self.get_current_token();
-                dbg!("skip space");
                 continue;
             }
             let val = match &token {
@@ -145,6 +142,9 @@ impl Tree {
                 Tokens::FileWrite => break,
                 Tokens::FileRead => break,
                 Tokens::RedirectInto => break,
+                Tokens::And => break,
+                Tokens::Or => break,
+                Tokens::JobCommandEnd => break,
                 Tokens::ParenthesisEnd => {
                     if self.i >= end - 1 {
                         break;
@@ -160,14 +160,11 @@ impl Tree {
             self.i += 1;
             token = self.tokens.get(self.i).unwrap();
             if matches!(token, Tokens::CommandEnd(_)) { break }
-            dbg!("parse call loop");
         }
-        dbg!(&token);
         match &token {
             Tokens::FileWrite | Tokens::FileRead | Tokens::RedirectInto => self.i -= 1,
             _ => {}
         }
-        dbg!(&self);
         // self.next();
         if buf.len() > 0 {
             values.push(CommandValue::Value(Value::Values(buf)));
@@ -201,7 +198,6 @@ impl Tree {
         let mut val_end = self.i;
         let mut found_first = false;
         for token in &self.tokens[self.i..] {
-            dbg!(&token);
             val_end += 1;
             match token {
                 Tokens::Space => if found_first { break },
@@ -211,7 +207,6 @@ impl Tree {
                 _ => { found_first = true; }
             }
         }
-        dbg!(&self.tokens[self.i..val_end]);
         val_end -= 1;
         let source = Box::new(self.get_value(val_end));
         self.inc();
@@ -271,7 +266,6 @@ impl Tree {
         loop {
             if self.i >= end - 1 { break; }
             expressions.push(self.get_expression(end));
-            dbg!(&expressions);
         }
         expressions
     }
@@ -317,8 +311,6 @@ impl Tree {
                         len += 1;
                     }
                     // self.inc();
-                    dbg!(&self);
-                    dbg!(len, lvl);
                     if lvl != 0 {
                         panic!("Sub not ended properly");
                     }
@@ -359,20 +351,15 @@ impl Tree {
 
     fn get_expression(&mut self, end: usize) -> Expression {
         let mut token = self.get_current_token();
-        dbg!("expr");
         let mut expr: Option<Expression> = None;
         loop {
-            dbg!(&token);
             match token {
                 Tokens::Space => {self.inc();},
-                Tokens::CommandEnd(_) => {self.inc();},
+                Tokens::CommandEnd(_) => { if matches!(expr, Some(_)) { break }; self.inc();},
                 Tokens::Literal(t) => if matches!(expr, Some(_)) {
-                    dbg!(t);
-                    dbg!(expr);
                     panic!("Unexpected literal. After file redirect, you need to use a semicolon or newline.");
                 } else {
                     expr = Some(self.parse_call(end));
-                    dbg!(&self);
                 },
                 Tokens::ExportSet => panic!("Unexpected token EXPORT_SET (=)"),
                 Tokens::Function => return Expression::Function(self.parse_function(end)),
@@ -382,13 +369,10 @@ impl Tree {
                     None => panic!("Unexpected token REDIRECT (|)"),
                     Some(_) => {
                         self.i += 1;
-                        dbg!(&self);
                         expr = Some(Expression::RedirectTargetExpression(RedirectTargetExpression { source: Box::new(expr.unwrap()), target: Box::new(self.get_expression(end)) }));
-                        dbg!("after redirect");
                     }
                 },
                 Tokens::ParenthesisStart => if matches!(expr, Some(_)) {
-                    dbg!(expr);
                     panic!("Unexpected parenthesis. After file redirect, you need to use a semicolon or newline.");
                 } else {
                     let mut len = 1;
@@ -411,28 +395,48 @@ impl Tree {
                         panic!("Parenthesis not ended properly.");
                     }
                     expr = Some(self.get_expression(self.i + len));
-                    dbg!(&self);
+                    self.inc();
                 },
                 Tokens::ParenthesisEnd => panic!("Unexpected token PARENTHESIS END ())"),
                 Tokens::ArrayFunction(_) => panic!("Unexpected array function"),
                 Tokens::StringFunction(_) => panic!("Unexpected string function"),
-                Tokens::SubStart => return self.parse_call(end),
+                Tokens::SubStart => if matches!(expr, Some(_)) {
+                    panic!("Unexpected literal. After file redirect, you need to use a semicolon or newline.");
+                } else {
+                    expr = Some(self.parse_call(end));
+                },
                 Tokens::Else => panic!("Unexpected token ELSE"),
                 Tokens::End => panic!("Unexpected token END"),
-                Tokens::For => return Expression::ForExpression(self.parse_for(end)),
-                Tokens::If => return Expression::IfExpression(self.parse_if(end)),
+                Tokens::For => match expr {
+                    Some(_) => panic!("Commands must be ended properly"),
+                    None => expr = Some(Expression::ForExpression(self.parse_for(end))),
+                },
+                Tokens::If => match expr {
+                    Some(_) => panic!("Commands must be ended properly"),
+                    None => expr = Some(Expression::IfExpression(self.parse_if(end))),
+                }
                 Tokens::Let => return self.parse_let(end),
                 Tokens::While => return Expression::WhileExpression(self.parse_while(end)),
                 Tokens::StringVariable(_, _) => if matches!(expr, Some(_)) {
-                    dbg!(expr);
                     panic!("Unexpected variable. After file redirect, you need to use a semicolon or newline.");
                 } else {
                     expr = Some(self.parse_call(end));
-                    dbg!(&self);
                 },
                 Tokens::ArrayVariable(_, _) => panic!("Unexpected array variable"),
-                Tokens::And => panic!("And not yet implemented"),
-                Tokens::Or => panic!("Or not yet implemented"),
+                Tokens::And => match expr {
+                    None => panic!("Unexpected AND (&&)"),
+                    Some(_) => {
+                        self.inc();
+                        expr = Some(Expression::AndExpression(AndExpression { first: Box::new(expr.unwrap()), second: Box::new(self.get_expression(end)) }));
+                    }
+                },
+                Tokens::Or => match expr {
+                    None => panic!("Unexpected OR (||)"),
+                    Some(_) => {
+                        self.inc();
+                        expr = Some(Expression::OrExpression(OrExpression { first: Box::new(expr.unwrap()), second: Box::new(self.get_expression(end)) }));
+                    }
+                },
                 Tokens::JobCommandEnd => panic!("Jobs not yet implemented")
             }
             if self.i >= end - 1 { break }
@@ -454,7 +458,6 @@ impl Tree {
 }
 
 pub fn build_tree(tokens: Vec<Tokens>) -> Vec<Expression> {
-    println!("Building tree");
     let mut expressions: Vec<Expression> = Vec::new();
     let mut tree = Tree { tokens, i: 0 };
     loop {
@@ -462,7 +465,5 @@ pub fn build_tree(tokens: Vec<Tokens>) -> Vec<Expression> {
         let val = tree.get_expression(tree.tokens.len());
         expressions.push(val);
     }
-    dbg!(&expressions);
-
     expressions
 }

@@ -1,11 +1,13 @@
 pub mod vars;
 pub mod ast;
 pub mod tokens;
+mod exec;
 
 use crate::parser::ast::{build_tree};
+use crate::parser::exec::exec_tree;
 use crate::parser::tokens::{tokenize};
 
-pub fn exec(reader: &mut dyn std::io::BufRead, ctx: vars::Context) {
+pub fn exec(reader: &mut dyn std::io::BufRead, ctx: &mut vars::Context) {
     let tokens = tokenize(reader).unwrap();
 
     dbg!(&tokens);
@@ -13,6 +15,8 @@ pub fn exec(reader: &mut dyn std::io::BufRead, ctx: vars::Context) {
     let expressions = build_tree(tokens);
 
     dbg!(&expressions);
+
+    exec_tree(expressions, ctx);
 }
 
 pub fn escape(str: String) -> String {
