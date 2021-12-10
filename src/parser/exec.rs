@@ -1,10 +1,11 @@
 use std::error::Error;
+use std::fs::File;
 use std::process::{Command, Stdio};
 use std::io;
 use std::ops::Deref;
-use crate::parser::ast::{CommandValue, Expression, LetExpression, RedirectTargetExpression, Value};
+use crate::parser::ast::{CommandValue, Expression, FileSourceExpression, FileTargetExpression, LetExpression, RedirectTargetExpression, Value};
 use crate::parser::vars;
-use crate::parser::vars::Variable;
+use crate::parser::vars::{Context, Variable};
 
 trait ExecExpression {
     fn exec(self, ctx: &mut vars::Context) -> Option<Command>;
@@ -64,17 +65,17 @@ impl ExecExpression for Expression {
         match self {
             Expression::LetExpression(expr) => expr.exec(ctx),
             Expression::Command(expr) => expr.exec(ctx),
-            Expression::JobCommand(_) => panic!("Not implemented yet"),
-            Expression::Function(_) => panic!("Not implemented yet"),
-            Expression::IfExpression(_) => panic!("Not implemented yet"),
-            Expression::WhileExpression(_) => panic!("Not implemented yet"),
-            Expression::ForExpression(_) => panic!("Not implemented yet"),
+            Expression::JobCommand(_) => todo!(),
+            Expression::Function(_) => todo!(),
+            Expression::IfExpression(_) => todo!(),
+            Expression::WhileExpression(_) => todo!(),
+            Expression::ForExpression(_) => todo!(),
             Expression::RedirectTargetExpression(expr) => expr.exec(ctx),
-            Expression::FileTargetExpression(_) => panic!("Not implemented yet"),
-            Expression::FileSourceExpression(_) => panic!("Not implemented yet"),
-            Expression::Expressions(_) => panic!("Not implemented yet"),
-            Expression::OrExpression(_) => panic!("Not implemented yet"),
-            Expression::AndExpression(_) => panic!("Not implemented yet")
+            Expression::FileTargetExpression(expr) => expr.exec(ctx),
+            Expression::FileSourceExpression(expr) => expr.exec(ctx),
+            Expression::Expressions(_) => todo!(),
+            Expression::OrExpression(_) => todo!(),
+            Expression::AndExpression(_) => todo!()
         }
     }
 }
@@ -117,8 +118,67 @@ impl ExecExpression for RedirectTargetExpression {
     }
 }
 
+impl ExecExpression for FileTargetExpression {
+    fn exec(mut self, ctx: &mut vars::Context) -> Option<Command> {
+        let mut src = self.source;
+        let mut target = self.target.get(ctx);
+        let mut src = match src {
+            Some(expr) => expr.exec(ctx),
+            None => {
+                todo!();
+            }
+        };
+        let command;
+        match src {
+            Some(mut cmd) => {
+                cmd.stdout(Stdio::piped());
+                let mut file = File::create(target.to_string());
+                match file {
+                    Result::Err(e) => println!("Error: {}", e),
+                    Result::Ok(mut file) => {
+                        match cmd.spawn() {
+                            Result::Err(e) => {
+                                println!("Error executing command: {}", e);
+                            },
+                            Result::Ok(res) => {
+                                io::copy(&mut res.stdout.unwrap(), &mut file);
+                            }
+                        }
+                    }
+                }
+                command = cmd;
+            },
+            None => { panic!("Invalid command provided for file target"); }
+        };
+        Some(command)
+    }
+}
+
+impl ExecExpression for FileSourceExpression {
+    fn exec(self, ctx: &mut Context) -> Option<Command> {
+        let mut source = self.source.get(ctx).to_string();
+        let mut target = self.target;
+        let mut target = match target {
+            Some(expr) => expr.exec(ctx),
+            None => {
+                Some(Command::new("less"))
+            }
+        };
+        let mut command = match target {
+            None => { panic!("Invalid command") },
+            Some(cmd) => cmd
+        };
+        let mut source = match File::open(source) {
+            Result::Err(e) => panic!("Cannot open file: {}", e),
+            Result::Ok(file) => file
+        };
+        command.stdin(source);
+
+        Some(command)
+    }
+}
+
 pub fn exec_tree(tree: Vec<Expression>, ctx: &mut vars::Context) {
-    println!("Executing");
     for mut expression in tree {
         let mut cmd = expression.exec(ctx);
         match cmd {
