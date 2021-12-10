@@ -294,12 +294,15 @@ impl Tree {
                 Tokens::StringFunction(_) => panic!("Unexpected string function"),
                 Tokens::ParenthesisStart => panic!("Parenthesis not yet implemented"),
                 Tokens::SubStart => {
-                    let mut len = 1;
+                    let mut len = 0;
                     let mut lvl = 1;
                     self.inc();
                     for token in &self.tokens[self.i..] {
                         match token {
                             Tokens::SubStart => lvl += 1,
+                            Tokens::StringFunction(_) => lvl += 1,
+                            Tokens::ArrayFunction(_) => lvl += 1,
+                            Tokens::ParenthesisStart => lvl += 1,
                             Tokens::ParenthesisEnd => lvl -= 1,
                             _ => {}
                         }
@@ -312,9 +315,13 @@ impl Tree {
                     }
                     // self.inc();
                     if lvl != 0 {
-                        panic!("Sub not ended properly");
+                        panic!("Parenthesis do not match");
                     }
-                    return Value::Expressions(self.parse_sub(self.i + len));
+                    dbg!(&self, len);
+                    let val = Value::Expressions(self.parse_sub(self.i + len));
+                    self.inc();
+                    dbg!(self);
+                    return val;
                 },
                 Tokens::Else => buf.push(Value::Literal(token.to_str())),
                 Tokens::End => buf.push(Value::Literal(token.to_str())),
@@ -361,7 +368,7 @@ impl Tree {
                 } else {
                     expr = Some(self.parse_call(end));
                 },
-                Tokens::ExportSet => panic!("Unexpected token EXPORT_SET (=)"),
+                Tokens::ExportSet => panic!("Unexpected token EXPORT SET (=)"),
                 Tokens::Function => return Expression::Function(self.parse_function(end)),
                 Tokens::FileRead => expr = Some(self.parse_read(expr, end)),
                 Tokens::FileWrite => expr = Some(self.parse_write(expr, end)),

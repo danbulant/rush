@@ -1,6 +1,6 @@
 use std::error::Error;
 use std::fs::File;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::io;
 use std::ops::Deref;
 use crate::parser::ast::{AndExpression, CommandValue, Expression, FileSourceExpression, FileTargetExpression, LetExpression, OrExpression, RedirectTargetExpression, Value};
@@ -13,6 +13,89 @@ trait ExecExpression {
 
 trait GetValue {
     fn get(self, ctx: &mut vars::Context) -> Variable;
+}
+
+struct ExecResult {
+    cmd: Option<Command>,
+    child: Option<Child>
+}
+
+impl ExecResult {
+    fn new(cmd: Option<Command>, child: Option<Child>) -> Self {
+        Self { cmd, child }
+    }
+    /// Spawns the result, running the command (if any). Non-command results won't be spawned (like let statements)
+    fn spawn(&mut self) -> &mut Self {
+        if !self.started() {
+            match &mut self.cmd {
+                None => {},
+                Some(cmd) => {
+                    self.child = Some(cmd.spawn().unwrap());
+                }
+            }
+        }
+        self
+    }
+    /// Checks if the result was spawned before by checking the child property. Non-command results won't ever be spawned (like let statements)
+    fn started(&self) -> bool {
+        matches!(self.child, Some(_))
+    }
+    /// A simple wrapper for redirecting current result (self) into STDIO (files or streams).
+    ///
+    /// Does spawn the current result
+    fn redirect_into<T: std::io::Write>(mut self, into: &mut T) -> &mut T {
+        match &mut self.cmd {
+            None => {},
+            Some(cmd) => {
+                cmd.stdout(Stdio::piped());
+                self.spawn();
+                let child = self.child.unwrap();
+                let mut stdout = child.stdout.unwrap();
+                io::copy(&mut stdout, into);
+            }
+        }
+        into
+    }
+    /// A shorthand for redirecting current result into the next one
+    ///
+    /// Uses `redirect_from_result` of the next result. Spawns this result, but not the next one.
+    fn redirect_into_result(&mut self, into: &mut ExecResult) -> &mut Self {
+        into.redirect_from_result(self);
+        self
+    }
+    /// Redirects the `from` into the current pending result
+    ///
+    /// Doesn't spawn the current result
+    fn redirect_from<T: Into<Stdio>>(&mut self, from: T) -> &mut Self {
+        match &mut self.cmd {
+            None => {},
+            Some(cmd) => {
+                cmd.stdin(from);
+            }
+        }
+        self
+    }
+    /// A shortcut for redirecting a previous result into the current one
+    ///
+    /// Spawns the previous result to obtain the output, but not the current one (self)
+    fn redirect_from_result(&mut self, into: &mut ExecResult) -> io::Result<&mut Self> {
+        if matches!(self.cmd, None) {
+            return Ok(self);
+        }
+        match &mut self.cmd {
+            None => {},
+            Some(source) => {
+                source.stdout(Stdio::piped());
+                match &mut into.cmd {
+                    None => {},
+                    Some(target) => {
+                        target.stdin(source.spawn()?.stdout.unwrap());
+                    }
+                };
+            }
+        }
+        Ok(self)
+    }
 }
 
 impl GetValue for CommandValue {
