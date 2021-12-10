@@ -3,7 +3,7 @@ use std::fs::File;
 use std::process::{Command, Stdio};
 use std::io;
 use std::ops::Deref;
-use crate::parser::ast::{CommandValue, Expression, FileSourceExpression, FileTargetExpression, LetExpression, RedirectTargetExpression, Value};
+use crate::parser::ast::{AndExpression, CommandValue, Expression, FileSourceExpression, FileTargetExpression, LetExpression, OrExpression, RedirectTargetExpression, Value};
 use crate::parser::vars;
 use crate::parser::vars::{Context, Variable};
 
@@ -73,9 +73,9 @@ impl ExecExpression for Expression {
             Expression::RedirectTargetExpression(expr) => expr.exec(ctx),
             Expression::FileTargetExpression(expr) => expr.exec(ctx),
             Expression::FileSourceExpression(expr) => expr.exec(ctx),
-            Expression::Expressions(_) => todo!(),
-            Expression::OrExpression(_) => todo!(),
-            Expression::AndExpression(_) => todo!()
+            Expression::Expressions(expr) => expr.exec(ctx),
+            Expression::OrExpression(expr) => expr.exec(ctx),
+            Expression::AndExpression(expr) => expr.exec(ctx)
         }
     }
 }
@@ -178,6 +178,62 @@ impl ExecExpression for FileSourceExpression {
     }
 }
 
+impl ExecExpression for Vec<Expression> {
+    fn exec(self, ctx: &mut Context) -> Option<Command> {
+        let mut last = None;
+        for expr in self {
+            last = expr.exec(ctx);
+        }
+        last
+    }
+}
+
+impl ExecExpression for OrExpression {
+    fn exec(self, ctx: &mut Context) -> Option<Command> {
+        let mut first = match self.first.exec(ctx) {
+            None => panic!("Invalid OR expression"),
+            Some(cmd) => cmd
+        };
+        let mut res = match first.spawn() {
+            Result::Err(e) => {
+                self.second.exec(ctx)
+            },
+            Result::Ok(mut res) => {
+                if res.wait().unwrap().success() {
+                    Some(first)
+                } else {
+                    self.second.exec(ctx)
+                }
+            }
+        };
+
+        res
+    }
+}
+
+impl ExecExpression for AndExpression {
+    fn exec(self, ctx: &mut Context) -> Option<Command> {
+        let mut first = match self.first.exec(ctx) {
+            None => panic!("Invalid AND expression"),
+            Some(cmd) => cmd
+        };
+        let mut res = match first.spawn() {
+            Result::Err(e) => {
+                Some(first)
+            },
+            Result::Ok(mut res) => {
+                if !res.wait().unwrap().success() {
+                    Some(first)
+                } else {
+                    self.second.exec(ctx)
+                }
+            }
+        };
+
+        res
+    }
+}
+
 pub fn exec_tree(tree: Vec<Expression>, ctx: &mut vars::Context) {
     for mut expression in tree {
         let mut cmd = expression.exec(ctx);
@@ -189,7 +245,7 @@ pub fn exec_tree(tree: Vec<Expression>, ctx: &mut vars::Context) {
                 },
                 Result::Ok(mut res) => {
                     let out = res.wait().unwrap();
-                    ctx.set_var(String::from("!"), Variable::I32(out.code().unwrap_or(1)));
+                    ctx.set_var(String::from("?"), Variable::I32(out.code().unwrap_or(1)));
                 }
             }
         }

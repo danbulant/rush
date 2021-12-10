@@ -98,6 +98,11 @@ fn read_var_ahead(i: usize, text: &String) -> (usize, Tokens) {
                 }
                 break;
             }
+            '?' => {
+                buf.push(letter.clone());
+                x += 1;
+                break;
+            }
             _ => { if !parens_mode { break } else { panic!("Invalid variable name") } }
         }
     }
