@@ -1,4 +1,4 @@
-use std::io;
+use anyhow::{Result, bail};
 
 #[derive(Debug)]
 pub enum Tokens {
@@ -46,6 +46,8 @@ impl Tokens {
             "<" => Tokens::FileRead,
             "|" => Tokens::RedirectInto,
             "\r\n" | "\n" | ";" => Tokens::CommandEnd(str.chars().nth(0).unwrap()),
+            "&&" => Tokens::And,
+            "||" => Tokens::Or,
             "=" => Tokens::ExportSet,
             "break" => Tokens::Break,
             _ => Tokens::Literal(str)
@@ -88,6 +90,7 @@ fn read_var_ahead(i: usize, text: &String) -> (usize, Tokens) {
     let mut x = i;
     let mut buf = String::new();
     let parens_mode = text.chars().nth(x + 1).unwrap() == '{';
+    if parens_mode { x += 1 }
     loop {
         x += 1;
         let letter: char = text.chars().nth(x).unwrap();
@@ -106,7 +109,7 @@ fn read_var_ahead(i: usize, text: &String) -> (usize, Tokens) {
                 x += 1;
                 break;
             }
-            _ => { if !parens_mode { break } else { panic!("Invalid variable name") } }
+            l => { if !parens_mode { break } else { panic!("Invalid variable name (starting with '{:?}{:?}')", buf, l) } }
         }
     }
     let token = match text.chars().nth(i).unwrap() {
@@ -117,12 +120,12 @@ fn read_var_ahead(i: usize, text: &String) -> (usize, Tokens) {
     (x - i - 1, token)
 }
 
-pub fn tokenize(reader: &mut dyn std::io::BufRead) -> io::Result<Vec<Tokens>> {
+pub fn tokenize(reader: &mut dyn std::io::BufRead) -> Result<Vec<Tokens>> {
     let mut quote_active = false;
     let mut double_quote_active = false;
     let mut escape_active = false;
     let mut text = String::new();
-    reader.read_to_string(&mut text);
+    reader.read_to_string(&mut text)?;
     let mut text_length = text.len();
 
     let mut tokens: Vec<Tokens> = Vec::new();
@@ -162,12 +165,42 @@ pub fn tokenize(reader: &mut dyn std::io::BufRead) -> io::Result<Vec<Tokens>> {
                                 token = Tokens::ArrayFunction(str.clone());
                             }
                         }
-                        _ => panic!("Cannot happen")
+                        _ => bail!("Cannot happen")
                     }
                     tokens.push(token);
                     skipper = skippers;
                     buf_add = false;
                 }
+            },
+            ';' | '\r' | '\n' => if !escape_active && !quote_active && !double_quote_active {
+                save_buf(&mut buf, &mut tokens);
+                tokens.push(Tokens::CommandEnd(letter.clone()));
+                let mut x = i;
+                while x < text.len() - 1 && matches!(text.chars().nth(x).unwrap(), '\n' | '\r' | ';' | ' ') {
+                    x += 1;
+                }
+                skipper = x - i - 1;
+                buf_add = false;
+            },
+            '&' => if !escape_active && !quote_active && !double_quote_active {
+                save_buf(&mut buf, &mut tokens);
+                if i + 1 < text.len() && text.chars().nth(i+1).unwrap() == '&' {
+                    tokens.push(Tokens::And);
+                    skipper = 1;
+                } else {
+                    tokens.push(Tokens::JobCommandEnd);
+                }
+                buf_add = false;
+            },
+            '|' => if !escape_active && !quote_active && !double_quote_active {
+                save_buf(&mut buf, &mut tokens);
+                if i + 1 < text.len() && text.chars().nth(i+1).unwrap() == '|' {
+                    tokens.push(Tokens::Or);
+                    skipper = 1;
+                } else {
+                    tokens.push(Tokens::RedirectInto);
+                }
+                buf_add = false;
             },
             ' ' => if !escape_active && !quote_active && !double_quote_active {
                 save_buf(&mut buf, &mut tokens);
@@ -207,9 +240,7 @@ pub fn tokenize(reader: &mut dyn std::io::BufRead) -> io::Result<Vec<Tokens>> {
             buf.push(*letter);
         }
     }
-    if buf.len() > 0 {
-        tokens.push(Tokens::Literal(buf));
-    }
+    save_buf(&mut buf, &mut tokens);
 
     Ok(tokens)
 }

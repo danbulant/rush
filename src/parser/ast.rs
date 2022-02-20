@@ -296,14 +296,14 @@ impl Tree {
         let mut contents = Vec::new();
         loop {
             let token = self.get_next_token();
-            dbg!(token);
+            dbg!(token, matches!(token, Tokens::End));
             match token {
                 Tokens::End => break,
-                Tokens::Space => { self.inc(); },
                 _ => contents.push(self.get_expression(end).with_context(|| "Error getting contents for while expression")?)
             };
             dbg!(&contents);
         }
+        self.inc();
         Ok(WhileExpression { condition: Box::new(condition), contents })
     }
 
@@ -411,6 +411,7 @@ impl Tree {
                 Tokens::Space => {self.inc();},
                 Tokens::CommandEnd(_) => { if matches!(expr, Some(_)) { break }; self.inc();},
                 Tokens::Literal(_) => if matches!(expr, Some(_)) {
+                    dbg!(expr);
                     bail!("Unexpected literal. After file redirect, you need to use a semicolon or newline.");
                 } else {
                     expr = Some(self.parse_call(end)?);
@@ -492,6 +493,7 @@ impl Tree {
                 },
                 Tokens::Break => match expr {
                     None => {
+                        self.inc();
                         expr = Some(Expression::BreakExpression(BreakExpression { num: Box::new(self.get_value(end)?)}));
                     },
                     Some(_) => bail!("Unexpected break")

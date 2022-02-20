@@ -9,9 +9,7 @@ use crate::parser::tokens::{tokenize};
 use anyhow::Result;
 
 pub fn exec(reader: &mut dyn std::io::BufRead, ctx: &mut vars::Context) -> Result<()> {
-    let tokens = tokenize(reader).unwrap();
-
-    dbg!(&tokens);
+    let tokens = tokenize(reader)?;
 
     let expressions = build_tree(tokens)?;
 
