@@ -10,7 +10,6 @@ use termion::raw::{IntoRawMode, RawTerminal};
 use termion::input::TermRead;
 use termion::cursor::{DetectCursorPos};
 use termion::event::*;
-// use termion::input::{MouseTerminal};
 
 struct Term {
     input: String,
@@ -80,10 +79,14 @@ fn main() {
     shell.ctx.add_scope(true);
     loop {
         print!("$: ");
-        io::stdout().flush();
+        io::stdout().flush().unwrap();
         shell.collect();
         shell.term.input += "\n";
-        parser::exec(&mut shell.term.input.as_bytes(), &mut shell.ctx);
+        let res = parser::exec(&mut shell.term.input.as_bytes(), &mut shell.ctx);
+        match res {
+            Err(err) => eprintln!("rush: {}", err),
+            Ok(_) => {}
+        }
     }
 }
 

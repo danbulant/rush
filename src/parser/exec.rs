@@ -1,8 +1,6 @@
-use std::error::Error;
 use std::fs::File;
 use std::process::{Child, Command, Stdio};
 use std::io;
-use std::ops::Deref;
 use crate::parser::ast::{AndExpression, CommandValue, Expression, FileSourceExpression, FileTargetExpression, LetExpression, OrExpression, RedirectTargetExpression, Value};
 use crate::parser::vars;
 use crate::parser::vars::{Context, Variable};

@@ -6,8 +6,9 @@ mod exec;
 use crate::parser::ast::{build_tree};
 use crate::parser::exec::exec_tree;
 use crate::parser::tokens::{tokenize};
+use anyhow::Result;
 
-pub fn exec(reader: &mut dyn std::io::BufRead, ctx: &mut vars::Context) {
+pub fn exec(reader: &mut dyn std::io::BufRead, ctx: &mut vars::Context) -> Result<()> {
     let tokens = tokenize(reader).unwrap();
 
     dbg!(&tokens);
@@ -16,7 +17,8 @@ pub fn exec(reader: &mut dyn std::io::BufRead, ctx: &mut vars::Context) {
 
     dbg!(&expressions);
 
-    exec_tree(expressions, ctx);
+    exec_tree(expressions?, ctx);
+    Ok(())
 }
 
 pub fn escape(str: String) -> String {
