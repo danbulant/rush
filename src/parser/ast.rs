@@ -1,9 +1,10 @@
 use crate::parser::tokens::Tokens;
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 
 #[derive(Debug)]
 pub struct LetExpression {
     pub key: Box<Value>,
+    pub vartype: Option<String>,
     pub value: Box<Value>
 }
 
@@ -22,7 +23,8 @@ pub struct OrExpression {
 #[derive(Debug)]
 pub struct IfExpression {
     pub condition: Box<Expression>,
-    pub contents: Vec<Expression>
+    pub contents: Vec<Expression>,
+    pub else_contents: Vec<Expression>
 }
 
 #[derive(Debug)]
@@ -63,8 +65,15 @@ pub enum Value {
 }
 
 #[derive(Debug)]
+pub struct FunctionVariable {
+    pub name: String,
+    pub vartype: Option<String>
+}
+
+#[derive(Debug)]
 pub struct FunctionDefinitionExpression {
-    pub args: Vec<String>,
+    pub name: String,
+    pub args: Vec<FunctionVariable>,
     pub body: Box<Expression>
 }
 
@@ -93,6 +102,11 @@ pub enum CommandValue {
 }
 
 #[derive(Debug)]
+pub struct BreakExpression {
+    pub num: Box<Value>
+}
+
+#[derive(Debug)]
 pub enum Expression {
     LetExpression(LetExpression),
     Command(Vec<CommandValue>),
@@ -106,7 +120,8 @@ pub enum Expression {
     FileSourceExpression(FileSourceExpression),
     Expressions(Vec<Expression>),
     OrExpression(OrExpression),
-    AndExpression(AndExpression)
+    AndExpression(AndExpression),
+    BreakExpression(BreakExpression)
 }
 
 #[derive(Debug)]
@@ -190,7 +205,7 @@ impl Tree {
         self.inc(); // ????
         self.inc();
         let value = Box::new(self.get_value(end)?);
-        Ok(Expression::LetExpression(LetExpression { key, value }))
+        Ok(Expression::LetExpression(LetExpression { key, vartype: None, value }))
     }
 
     fn parse_read(&mut self, target: Option<Expression>, _end: usize) -> Result<Expression> {
@@ -241,28 +256,55 @@ impl Tree {
         Ok(Expression::FileTargetExpression(FileTargetExpression { source, target }))
     }
 
-    fn parse_function(&self, _end: usize) -> Result<FunctionDefinitionExpression> {
+    fn parse_function(&mut self, _end: usize) -> Result<FunctionDefinitionExpression> {
         bail!("Functions not yet implemented")
     }
 
-    fn parse_array_func(&self, _str: String, _end: usize) -> Result<DefinedFunction> {
+    fn parse_array_func(&mut self, _str: String, _end: usize) -> Result<DefinedFunction> {
         bail!("Array functions not yet implemented");
     }
 
-    fn parse_string_func(&self, _str: String, _end: usize) -> Result<DefinedFunction> {
+    fn parse_string_func(&mut self, _str: String, _end: usize) -> Result<DefinedFunction> {
         bail!("Array functions not yet implemented");
     }
 
-    fn parse_for(&self, _end: usize) -> Result<ForExpression> {
+    fn parse_for(&mut self, _end: usize) -> Result<ForExpression> {
         bail!("For loop not yet implemented");
     }
 
-    fn parse_if(&self, _end: usize) -> Result<IfExpression> {
-        bail!("If not yet implemented");
+    fn parse_if(&mut self, end: usize) -> Result<IfExpression> {
+        self.inc();
+        let condition = self.get_expression(end).with_context(|| "Error getting condition for if expression")?;
+        dbg!(&condition);
+        let mut contents = Vec::new();
+        loop {
+            match self.get_next_token() {
+                Tokens::End => break,
+                Tokens::Space => { self.inc(); },
+                _ => contents.push(self.get_expression(end).with_context(|| "Error getting contents for if expression")?)
+            };
+        }
+        let mut else_contents = Vec::new();
+        Ok(IfExpression { condition: Box::new(condition), contents, else_contents })
     }
 
-    fn parse_while(&self, _end: usize) -> Result<WhileExpression> {
-        bail!("While not yet implemented");
+    fn parse_while(&mut self, end: usize) -> Result<WhileExpression> {
+        self.inc();
+        let condition = self.get_expression(end).with_context(|| "Error getting condition for while expression")?;
+        dbg!(&condition);
+        dbg!(self.i);
+        let mut contents = Vec::new();
+        loop {
+            let token = self.get_next_token();
+            dbg!(token);
+            match token {
+                Tokens::End => break,
+                Tokens::Space => { self.inc(); },
+                _ => contents.push(self.get_expression(end).with_context(|| "Error getting contents for while expression")?)
+            };
+            dbg!(&contents);
+        }
+        Ok(WhileExpression { condition: Box::new(condition), contents })
     }
 
     fn parse_sub(&mut self, end: usize) -> Result<Vec<Expression>> {
@@ -319,7 +361,7 @@ impl Tree {
                     }
                     // self.inc();
                     if lvl != 0 {
-                        panic!("Parenthesis do not match");
+                        bail!("Parenthesis do not match");
                     }
                     dbg!(&self, len);
                     let val = Value::Expressions(self.parse_sub(self.i + len)?);
@@ -349,6 +391,7 @@ impl Tree {
                 },
                 Tokens::And => bail!("Unexpected AND (&&)"),
                 Tokens::Or => bail!("Unexpected OR (||)"),
+                Tokens::Break => buf.push(Value::Literal(token.to_str())),
                 Tokens::JobCommandEnd => bail!("Unexpected job command end (&)"),
             }
             if self.i >= end - 1 { break }
@@ -367,7 +410,7 @@ impl Tree {
             match token {
                 Tokens::Space => {self.inc();},
                 Tokens::CommandEnd(_) => { if matches!(expr, Some(_)) { break }; self.inc();},
-                Tokens::Literal(t) => if matches!(expr, Some(_)) {
+                Tokens::Literal(_) => if matches!(expr, Some(_)) {
                     bail!("Unexpected literal. After file redirect, you need to use a semicolon or newline.");
                 } else {
                     expr = Some(self.parse_call(end)?);
@@ -416,7 +459,7 @@ impl Tree {
                     _ => expr = Some(self.parse_call(end)?)
                 },
                 Tokens::Else => bail!("Unexpected token ELSE"),
-                Tokens::End => bail!("Unexpected token END"),
+                Tokens::End => bail!("Unexpected token END\nCurrent expression:{:?}", expr),
                 Tokens::For => match expr {
                     Some(_) => bail!("Commands must be ended properly"),
                     None => expr = Some(Expression::ForExpression(self.parse_for(end)?)),
@@ -447,6 +490,12 @@ impl Tree {
                         expr = Some(Expression::OrExpression(OrExpression { first: Box::new(expr.unwrap()), second: Box::new(self.get_expression(end)?) }));
                     }
                 },
+                Tokens::Break => match expr {
+                    None => {
+                        expr = Some(Expression::BreakExpression(BreakExpression { num: Box::new(self.get_value(end)?)}));
+                    },
+                    Some(_) => bail!("Unexpected break")
+                }
                 Tokens::JobCommandEnd => bail!("Jobs not yet implemented")
             }
             if self.i >= end - 1 { break }
@@ -462,21 +511,23 @@ impl Tree {
         self.i += 1;
         self
     }
-    fn get_current_token(&self) -> &Tokens {
-        self.tokens.get(self.i).unwrap()
-    }
-    fn get_next_token(&self) -> &Tokens {
-        self.tokens.get(self.i + 1).unwrap()
-    }
+    fn get_current_token(&self) -> &Tokens { self.tokens.get(self.i).unwrap() }
+    fn get_next_token(&self) -> &Tokens { self.tokens.get(self.i + 1).unwrap() }
 }
 
 pub fn build_tree(tokens: Vec<Tokens>) -> Result<Vec<Expression>> {
     let mut expressions: Vec<Expression> = Vec::new();
     let mut tree = Tree { tokens, i: 0 };
     loop {
-        if tree.i == tree.tokens.len() - 1 { break; }
+        if tree.i >= tree.tokens.len() - 1 { break; }
         let val = tree.get_expression(tree.tokens.len());
-        expressions.push(val?);
+        match val {
+            Ok(val) => expressions.push(val),
+            Err(error) => {
+                dbg!(tree);
+                return Err(error);
+            }
+        }
     }
     Ok(expressions)
 }

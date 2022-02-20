@@ -25,6 +25,7 @@ pub enum Tokens {
     FileWrite,
     And,
     Or,
+    Break,
     JobCommandEnd
 }
 
@@ -44,8 +45,9 @@ impl Tokens {
             ">" => Tokens::FileWrite,
             "<" => Tokens::FileRead,
             "|" => Tokens::RedirectInto,
-            "\n" | ";" => Tokens::CommandEnd(str.chars().nth(0).unwrap()),
+            "\r\n" | "\n" | ";" => Tokens::CommandEnd(str.chars().nth(0).unwrap()),
             "=" => Tokens::ExportSet,
+            "break" => Tokens::Break,
             _ => Tokens::Literal(str)
         }
     }
@@ -75,6 +77,7 @@ impl Tokens {
             Tokens::FileWrite => ">".to_string(),
             Tokens::And => "&&".to_string(),
             Tokens::Or => "||".to_string(),
+            Tokens::Break => "break".to_string(),
             Tokens::JobCommandEnd => "&".to_string()
         }
     }
@@ -114,12 +117,6 @@ fn read_var_ahead(i: usize, text: &String) -> (usize, Tokens) {
     (x - i - 1, token)
 }
 
-fn check_keyword(text: &String, i: usize, keyword: &str) -> bool {
-    let text_length = text.len();
-    if text_length < i + keyword.len() + 1 { return false; }
-    text.chars().skip(i).take(keyword.len()).collect::<String>() == keyword
-}
-
 pub fn tokenize(reader: &mut dyn std::io::BufRead) -> io::Result<Vec<Tokens>> {
     let mut quote_active = false;
     let mut double_quote_active = false;
@@ -129,6 +126,10 @@ pub fn tokenize(reader: &mut dyn std::io::BufRead) -> io::Result<Vec<Tokens>> {
     let mut text_length = text.len();
 
     let mut tokens: Vec<Tokens> = Vec::new();
+
+    fn save_buf(buf: &mut String, tokens: &mut Vec<Tokens>) {
+        if buf.len() > 0 { tokens.push(Tokens::detect(std::mem::take(buf))) }
+    }
 
     let mut buf = String::new();
     let mut skipper = 0;
@@ -143,10 +144,7 @@ pub fn tokenize(reader: &mut dyn std::io::BufRead) -> io::Result<Vec<Tokens>> {
             '"' => if !escape_active && !quote_active { double_quote_active = !double_quote_active; buf_add = false },
             '\'' => if !escape_active && !double_quote_active { quote_active = !quote_active; buf_add = false },
             '$' => if !escape_active && !quote_active {
-                if buf.len() > 0 {
-                    tokens.push(Tokens::Literal(buf));
-                    buf = String::new();
-                }
+                save_buf(&mut buf, &mut tokens);
                 if text_length > i && text.chars().nth(i + 1).unwrap() == '(' {
                     tokens.push(Tokens::SubStart);
                     skipper = 1;
@@ -172,10 +170,7 @@ pub fn tokenize(reader: &mut dyn std::io::BufRead) -> io::Result<Vec<Tokens>> {
                 }
             },
             ' ' => if !escape_active && !quote_active && !double_quote_active {
-                if buf.len() > 0 {
-                    tokens.push(Tokens::Literal(buf));
-                    buf = String::new();
-                }
+                save_buf(&mut buf, &mut tokens);
                 tokens.push(Tokens::Space);
                 let mut x = i;
                 while text.chars().nth(x).unwrap() == ' ' {
@@ -185,132 +180,13 @@ pub fn tokenize(reader: &mut dyn std::io::BufRead) -> io::Result<Vec<Tokens>> {
                 buf_add = false;
             },
             '(' => if !quote_active && !double_quote_active && !escape_active {
-                if buf.len() > 0 {
-                    tokens.push(Tokens::Literal(buf));
-                    buf = String::new();
-                }
+                save_buf(&mut buf, &mut tokens);
                 tokens.push(Tokens::ParenthesisStart);
                 buf_add = false;
             }
             ')' => if !quote_active && !double_quote_active && !escape_active {
-                if buf.len() > 0 {
-                    tokens.push(Tokens::Literal(buf));
-                    buf = String::new();
-                }
+                save_buf(&mut buf, &mut tokens);
                 tokens.push(Tokens::ParenthesisEnd);
-                buf_add = false;
-            },
-            'i' => if !quote_active && !double_quote_active && !escape_active {
-                if check_keyword(&text, i, "if") {
-                    if buf.len() > 0 {
-                        tokens.push(Tokens::Literal(buf));
-                        buf = String::new();
-                    }
-                    skipper = 2;
-                    tokens.push(Tokens::If);
-                    buf_add = false;
-                }
-            },
-            'e' => if !quote_active && !double_quote_active && !escape_active {
-                if check_keyword(&text, i, "else") {
-                    if buf.len() > 0 {
-                        tokens.push(Tokens::Literal(buf));
-                        buf = String::new();
-                    }
-                    skipper = 4;
-                    tokens.push(Tokens::Else);
-                    buf_add = false;
-                } else if check_keyword(&text, i , "end") {
-                    if buf.len() > 0 {
-                        tokens.push(Tokens::Literal(buf));
-                        buf = String::new();
-                    }
-                    skipper = 3;
-                    tokens.push(Tokens::End);
-                    buf_add = false;
-                }
-            },
-            'l' => if !quote_active && !double_quote_active && !escape_active {
-                if check_keyword(&text, i, "let") {
-                    if buf.len() > 0 {
-                        tokens.push(Tokens::Literal(buf));
-                        buf = String::new();
-                    }
-                    skipper = 3;
-                    tokens.push(Tokens::Let);
-                    buf_add = false;
-                }
-            },
-            'w' => if !quote_active && !double_quote_active && !escape_active {
-                if check_keyword(&text, i, "while") {
-                    if buf.len() > 0 {
-                        tokens.push(Tokens::Literal(buf));
-                        buf = String::new();
-                    }
-                    skipper = 5;
-                    tokens.push(Tokens::While);
-                    buf_add = false;
-                }
-            },
-            'f' => if !quote_active && !double_quote_active && !escape_active {
-                if check_keyword(&text, i, "for") {
-                    if buf.len() > 0 {
-                        tokens.push(Tokens::Literal(buf));
-                        buf = String::new();
-                    }
-                    skipper = 3;
-                    tokens.push(Tokens::If);
-                    buf_add = false;
-                }
-            },
-            '|' => if !escape_active && !quote_active && !double_quote_active {
-                if buf.len() > 0 {
-                    tokens.push(Tokens::Literal(buf));
-                    buf = String::new();
-                }
-                if check_keyword(&text, i, "||") {
-                    skipper = 1;
-                    tokens.push(Tokens::Or);
-                } else {
-                    tokens.push(Tokens::RedirectInto);
-                }
-                buf_add = false;
-            },
-            '&' => if !escape_active && !quote_active && !double_quote_active {
-                if buf.len() > 0 {
-                    tokens.push(Tokens::Literal(buf));
-                    buf = String::new();
-                }
-                if check_keyword(&text, i, "&&") {
-                    skipper = 1;
-                    tokens.push(Tokens::And);
-                } else {
-                    tokens.push(Tokens::JobCommandEnd);
-                }
-                buf_add = false;
-            },
-            '>' => if !escape_active && !quote_active && !double_quote_active {
-                if buf.len() > 0 {
-                    tokens.push(Tokens::Literal(buf));
-                    buf = String::new();
-                }
-                tokens.push(Tokens::FileWrite);
-                buf_add = false;
-            },
-            '<' => if !escape_active && !quote_active && !double_quote_active {
-                if buf.len() > 0 {
-                    tokens.push(Tokens::Literal(buf));
-                    buf = String::new();
-                }
-                tokens.push(Tokens::FileRead);
-                buf_add = false;
-            },
-            ';' | '\n' => if !escape_active && !quote_active && !double_quote_active {
-                if buf.len() > 0 {
-                    tokens.push(Tokens::Literal(buf));
-                    buf = String::new();
-                }
-                tokens.push(Tokens::CommandEnd(letter.clone()));
                 buf_add = false;
             },
             '\\' => if !escape_active {
@@ -320,10 +196,7 @@ pub fn tokenize(reader: &mut dyn std::io::BufRead) -> io::Result<Vec<Tokens>> {
                 escape_active = false;
             },
             '=' => if !escape_active && !quote_active && !double_quote_active {
-                if buf.len() > 0 {
-                    tokens.push(Tokens::Literal(buf));
-                    buf = String::new();
-                }
+                save_buf(&mut buf, &mut tokens);
                 tokens.push(Tokens::ExportSet);
                 buf_add = false;
             },

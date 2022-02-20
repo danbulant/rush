@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use anyhow::{bail, Result};
 use crate::parser::ast::FunctionDefinitionExpression;
 
 #[derive(Debug, Clone)]
@@ -50,43 +51,50 @@ impl Variable {
         }
     }
 
-    pub fn index(self: &Self) -> &Variable {
+    pub fn index(self: &Self, index: &Variable) -> Result<&Variable> {
         match self {
-            _ => panic!("Cannot index unsupported types")
+            _ => bail!("Cannot index unsupported types")
         }
     }
 }
 
 #[derive(Debug)]
 pub struct Scope {
-    pub active: bool,
+    /// list of variables
     pub vars: HashMap<String, Variable>,
-    pub func: HashMap<String, FunctionDefinitionExpression>
+    /// list of functions
+    pub func: HashMap<String, FunctionDefinitionExpression>,
+    /// list of file descriptors, to be closed when the scope is left
+    pub fd: Vec<usize>
 }
 
 #[derive(Debug)]
 pub struct Context {
     pub scopes: Vec<Scope>,
     pub exports: HashMap<String, String>,
-    pub fd: Vec<usize>
+    pub break_num: u16,
+    pub continue_num: u16
 }
 
 impl Context {
     pub fn new() -> Context {
-        Context {
+        let mut res = Context {
             scopes: Vec::new(),
             exports: HashMap::new(),
-            fd: Vec::new()
-        }
+            break_num: 0,
+            continue_num: 0
+        };
+        res.add_scope();
+        res
     }
     pub fn pop_scope(self: &mut Self) -> Option<Scope> {
         self.scopes.pop()
     }
-    pub fn add_scope(self: &mut Self, active: bool) {
+    pub fn add_scope(self: &mut Self) {
         let scope = Scope {
-            active,
             func: HashMap::new(),
-            vars: HashMap::new()
+            vars: HashMap::new(),
+            fd: Vec::new()
         };
         self.scopes.push(scope);
     }

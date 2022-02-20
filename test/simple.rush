@@ -3,37 +3,7 @@ echo test
 
 echo single; echo line
 
-echo test > cat
+echo test > cats
+rm cats
 
-grep echo < simple.rush
-
-let test = val
-echo var $test
-let test = $test
-echo var2 ${test}
-echo last exit code $?
-
-if true
-    echo condition true
-end
-
-if false
-    echo condition false
-end
-
-if true
-    echo condition true
-else
-    echo else
-end
-
-if false
-    echo condition false
-else if true
-    echo condition else true
-end
-
-while true
-    echo loop
-    break
-end
+grep echo < test/simple.rush

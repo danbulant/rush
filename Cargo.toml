@@ -10,4 +10,7 @@ edition = "2018"
 utf8-chars = "1.0.0"
 termion = "1.5.6"
 filedescriptor = "0.8.1"
-anyhow = "1.0.54"
+
+[dependencies.anyhow]
+version = "1.0.54"
+features = ["backtrace"]

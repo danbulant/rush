@@ -1,0 +1,7 @@
+let test = val
+echo var $test
+let test = $test
+echo var2 ${test}
+echo last exit code $?
+false
+echo last false exit code $?

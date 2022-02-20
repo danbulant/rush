@@ -59,11 +59,7 @@ impl Shell {
     fn new() -> Shell {
         return Shell {
             term: Term::new(),
-            ctx: parser::vars::Context {
-                scopes: Vec::new(),
-                fd: Vec::new(),
-                exports: HashMap::new()
-            },
+            ctx: parser::vars::Context::new()
         };
     }
 
@@ -76,7 +72,6 @@ impl Shell {
 
 fn main() {
     let mut shell = Shell::new();
-    shell.ctx.add_scope(true);
     loop {
         print!("$: ");
         io::stdout().flush().unwrap();
@@ -87,6 +82,41 @@ fn main() {
             Err(err) => eprintln!("rush: {}", err),
             Ok(_) => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::fs::File;
+    use std::io::BufReader;
+    use std::path::Path;
+    use crate::parser;
+    use anyhow::Result;
+
+    fn load_and_run<P: AsRef<Path>>(path: P) -> Result<()> {
+        let mut ctx = parser::vars::Context::new();
+        let src = File::open(path).unwrap();
+        parser::exec(&mut BufReader::new(src), &mut ctx)
+    }
+
+    #[test]
+    fn simple() -> Result<()> {
+        load_and_run("test/simple.rush")
+    }
+
+    #[test]
+    fn var() -> Result<()> {
+        load_and_run("test/var.rush")
+    }
+
+    #[test]
+    fn if_expr() -> Result<()> {
+        load_and_run("test/if.rush")
+    }
+
+    #[test]
+    fn while_expr() -> Result<()> {
+        load_and_run("test/while.rush")
     }
 }
 
