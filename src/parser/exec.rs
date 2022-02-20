@@ -166,9 +166,9 @@ impl ExecExpression for Expression {
 impl ExecExpression for BreakExpression {
     fn exec(self: &mut BreakExpression, ctx: &mut vars::Context) -> Result<Option<Command>> {
         if ctx.break_num > 0 { ctx.break_num -= 1; return Ok(None) }
-        let val = self.num.get(ctx)?;
-        let num: u16 = val.to_string().parse()?;
-        ctx.break_num = num;
+        let val = self.num.get(ctx)?.to_string();
+        let num: u16 = if val.len() > 0 { val.parse()? } else { 1 };
+        ctx.break_num = if num == 0 { 1 } else { num };
         Ok(None)
     }
 }
