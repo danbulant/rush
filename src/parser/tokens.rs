@@ -1,6 +1,13 @@
 use anyhow::{Result, bail};
 
 #[derive(Debug)]
+pub struct Token {
+    pub token: Tokens,
+    pub start: usize,
+    pub end: usize
+}
+
+#[derive(Debug)]
 pub enum Tokens {
     Space,
     Literal(String),
@@ -86,7 +93,7 @@ impl Tokens {
 }
 
 
-fn read_var_ahead(i: usize, text: &String) -> (usize, Tokens) {
+fn read_var_ahead(i: usize, text: &String) -> (usize, Token) {
     let mut x = i;
     let mut buf = String::new();
     let parens_mode = text.chars().nth(x + 1).unwrap() == '{';
@@ -113,14 +120,14 @@ fn read_var_ahead(i: usize, text: &String) -> (usize, Tokens) {
         }
     }
     let token = match text.chars().nth(i).unwrap() {
-        '$' => Tokens::StringVariable(buf, parens_mode),
-        '@' => Tokens::ArrayVariable(buf, parens_mode),
+        '$' => Token { token: Tokens::StringVariable(buf, parens_mode), start: i, end: i + x },
+        '@' => Token { token: Tokens::ArrayVariable(buf, parens_mode), start:i , end: i+x },
         a => panic!("Invalid value {}", a)
     };
     (x - i - 1, token)
 }
 
-pub fn tokenize(reader: &mut dyn std::io::BufRead) -> Result<Vec<Tokens>> {
+pub fn tokenize(reader: &mut dyn std::io::BufRead) -> Result<Vec<Token>> {
     let mut quote_active = false;
     let mut double_quote_active = false;
     let mut escape_active = false;
@@ -128,10 +135,10 @@ pub fn tokenize(reader: &mut dyn std::io::BufRead) -> Result<Vec<Tokens>> {
     reader.read_to_string(&mut text)?;
     let mut text_length = text.len();
 
-    let mut tokens: Vec<Tokens> = Vec::new();
+    let mut tokens: Vec<Token> = Vec::new();
 
-    fn save_buf(buf: &mut String, tokens: &mut Vec<Tokens>) {
-        if buf.len() > 0 { tokens.push(Tokens::detect(std::mem::take(buf))) }
+    fn save_buf(buf: &mut String, tokens: &mut Vec<Token>, i: usize) {
+        if buf.len() > 0 { tokens.push(Token { token: Tokens::detect(std::mem::take(buf)), end: i, start: i - buf.len() }) }
     }
 
     let mut buf = String::new();
@@ -147,22 +154,22 @@ pub fn tokenize(reader: &mut dyn std::io::BufRead) -> Result<Vec<Tokens>> {
             '"' => if !escape_active && !quote_active { double_quote_active = !double_quote_active; buf_add = false },
             '\'' => if !escape_active && !double_quote_active { quote_active = !quote_active; buf_add = false },
             '$' => if !escape_active && !quote_active {
-                save_buf(&mut buf, &mut tokens);
+                save_buf(&mut buf, &mut tokens, i);
                 if text_length > i && text.chars().nth(i + 1).unwrap() == '(' {
-                    tokens.push(Tokens::SubStart);
+                    tokens.push(Token { token: Tokens::SubStart, start: i, end: i+1 });
                     skipper = 1;
                     buf_add = false;
                 } else {
                     let (skippers, mut token) = read_var_ahead(i, &text);
-                    match token {
+                    match token.token {
                         Tokens::StringVariable(ref str, bool) => if !bool && !double_quote_active {
                             if text.len() > i + skippers && text.chars().nth(i + skippers).unwrap() == '(' {
-                                token = Tokens::StringFunction(str.clone());
+                                token = Token { token: Tokens::StringFunction(str.clone()), end: i + skippers, start: i };
                             }
                         },
                         Tokens::ArrayVariable(ref str, bool) => if !bool && !double_quote_active {
                             if text.len() > i + skippers && text.chars().nth(i + skippers).unwrap() == '(' {
-                                token = Tokens::ArrayFunction(str.clone());
+                                token = Token { token: Tokens::ArrayFunction(str.clone()), end: i+skippers, start: i };
                             }
                         }
                         _ => bail!("Cannot happen")
@@ -173,8 +180,8 @@ pub fn tokenize(reader: &mut dyn std::io::BufRead) -> Result<Vec<Tokens>> {
                 }
             },
             ';' | '\r' | '\n' => if !escape_active && !quote_active && !double_quote_active {
-                save_buf(&mut buf, &mut tokens);
-                tokens.push(Tokens::CommandEnd(letter.clone()));
+                save_buf(&mut buf, &mut tokens, i);
+                tokens.push(Token { token: Tokens::CommandEnd(letter.clone()), start: i, end: i });
                 let mut x = 0;
                 while x < text.len() - 1 && matches!(text.chars().nth(x).unwrap(), '\n' | '\r' | ';' | ' ') {
                     x += 1;
@@ -185,28 +192,28 @@ pub fn tokenize(reader: &mut dyn std::io::BufRead) -> Result<Vec<Tokens>> {
                 buf_add = false;
             },
             '&' => if !escape_active && !quote_active && !double_quote_active {
-                save_buf(&mut buf, &mut tokens);
+                save_buf(&mut buf, &mut tokens, i);
                 if i + 1 < text.len() && text.chars().nth(i+1).unwrap() == '&' {
-                    tokens.push(Tokens::And);
+                    tokens.push(Token { token: Tokens::And, start: i, end: i+1 });
                     skipper = 1;
                 } else {
-                    tokens.push(Tokens::JobCommandEnd);
+                    tokens.push(Token { token: Tokens::JobCommandEnd, start: i , end: i });
                 }
                 buf_add = false;
             },
             '|' => if !escape_active && !quote_active && !double_quote_active {
-                save_buf(&mut buf, &mut tokens);
+                save_buf(&mut buf, &mut tokens, i);
                 if i + 1 < text.len() && text.chars().nth(i+1).unwrap() == '|' {
-                    tokens.push(Tokens::Or);
+                    tokens.push(Token { token: Tokens::Or, start: i, end: i+1 });
                     skipper = 1;
                 } else {
-                    tokens.push(Tokens::RedirectInto);
+                    tokens.push(Token { token: Tokens::RedirectInto, start: i, end: i });
                 }
                 buf_add = false;
             },
             ' ' => if !escape_active && !quote_active && !double_quote_active {
-                save_buf(&mut buf, &mut tokens);
-                tokens.push(Tokens::Space);
+                save_buf(&mut buf, &mut tokens, i);
+                tokens.push(Token { token: Tokens::Space, start: i, end: i });
                 let mut x = i;
                 while text.chars().nth(x).unwrap() == ' ' {
                     x += 1;
@@ -215,13 +222,13 @@ pub fn tokenize(reader: &mut dyn std::io::BufRead) -> Result<Vec<Tokens>> {
                 buf_add = false;
             },
             '(' => if !quote_active && !double_quote_active && !escape_active {
-                save_buf(&mut buf, &mut tokens);
-                tokens.push(Tokens::ParenthesisStart);
+                save_buf(&mut buf, &mut tokens, i);
+                tokens.push(Token { token: Tokens::ParenthesisStart, start: i, end: i });
                 buf_add = false;
             }
             ')' => if !quote_active && !double_quote_active && !escape_active {
-                save_buf(&mut buf, &mut tokens);
-                tokens.push(Tokens::ParenthesisEnd);
+                save_buf(&mut buf, &mut tokens, i);
+                tokens.push(Token { token: Tokens::ParenthesisEnd, start: i, end: i });
                 buf_add = false;
             },
             '\\' => if !escape_active {
@@ -231,12 +238,12 @@ pub fn tokenize(reader: &mut dyn std::io::BufRead) -> Result<Vec<Tokens>> {
                 escape_active = false;
             },
             '=' => if !escape_active && !quote_active && !double_quote_active {
-                save_buf(&mut buf, &mut tokens);
-                tokens.push(Tokens::ExportSet);
+                save_buf(&mut buf, &mut tokens, i);
+                tokens.push(Token { token: Tokens::ExportSet, start: i, end: i });
                 buf_add = false;
             },
             '#' => if !escape_active && !quote_active && !double_quote_active {
-                save_buf(&mut buf, &mut tokens);
+                save_buf(&mut buf, &mut tokens, i);
                 buf_add = false;
                 let mut x = 0;
                 while x + i + 1 < text.len() && text.chars().nth(x + i + 1).unwrap() != '\n' {
@@ -251,7 +258,7 @@ pub fn tokenize(reader: &mut dyn std::io::BufRead) -> Result<Vec<Tokens>> {
             buf.push(*letter);
         }
     }
-    save_buf(&mut buf, &mut tokens);
+    save_buf(&mut buf, &mut tokens, text.len());
 
     Ok(tokens)
 }

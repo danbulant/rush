@@ -4,27 +4,37 @@ Rust shell. Inspired by Ion.
 
 In case you're reading this: rush is in the works and not a priority. Features may be missing even if defined below.
 
+## Scopes
+
+Variables are block scoped.
+
+Block scope creation:
+- `if`
+- `while`
+- `else`
+- `for..`
+- `$(expr)`
+
+Functions have a copy of their scope.
+
+Files create file scopes, to which functions are scoped.
+
 ## Syntax
 
 `;` is 'alias' for new line.
 
 Syntax and type errors crash the program.
 
-Scopes are for each block. Functions won't have access to variables it wouldn't have access if it wasn't a function:
-
-```sh
-fn testing
-    echo $t
-end
-
-if true
-    testing # Error! t is not defined
-end
-```
+Variables are scoped to their block, and immediately freed when their block is left.
 
 ### Variables
 
-String variables using `$`, arrays using `@`.
+String variable value can be obtained using `$`, arrays using `@`.
+
+When an array is stringified (referred to with `$`), it's contents are joined with space.
+No special treatment of `PATH`.
+
+Currently, the shell doesn't error out when variable doesn't exist, instead, it's replaced by an empty string.
 
 Assigned using `let`.
 Left side is evaluated to a string as well.
@@ -37,8 +47,9 @@ echo $d # c
 ```
 
 Arrays are assigned using `[ var ]`. You can join arrays and strings by simply passing them there, like `[ $var @var ]`.
+Arrays and maps cannot be nested during definition (`[ $var [@var] ]` should have the same effect).
 
-All assignments are done via the `let` keyword.
+All assignments are done via the `let` keyword. If the variable exists, it is overwritten (even in upper scopes).
 Instead of `=`, other operations are supported:
 
 * `*=` - multiply
@@ -55,29 +66,9 @@ Instead of `=`, other operations are supported:
 `env::` namespace contains the environment (and doesn't error out if the variable doesn't exist, instead, empty string is returned)
 `color::` (alias `c::`) has a number of colors
 
-#### Types
-
-Based on the value set in the set `let` (the one with just `=`), a type is infered (unless specificaly set using `let x:type = ...`). This type is then used for the operations after.
-
-Supported types:
-
-* `i32` (alias int)
-* `i64`
-* `i128`
-* `u32`
-* `u64`
-* `u128`
-* `f32`
-* `f64`
-* `str`
-* `hmap[T]` (where T is one of the other types, except array)
-* `[T]` (where T is one of the other types, except hmap)
-
-HashMap is basically array, but with string keys (instead of numbers) in random order.
-
 ### Return
 
-Sets the exit code (and possibly exits function/script early). If no return is set, the return code is set to the return code of the last expression.
+Sets the exit code (and possibly exits function/script early). If no return is set, the return code is set to the return code of the last expression (`$?`).
 
 ### Math
 
@@ -99,29 +90,32 @@ Slices: `[x..y]` gets a substring (or subarray) of the variable. When `x` ommite
 
 Bracketless. Scopes are ended by the keyword `end`.
 
-`if` - Runs it's scope if the command returns `0`. Useful in pair with `test` builtin.
-`for $val of @arr` - Runs for each value of the array (or hashmap)
-`for $val of ...` - Runs for each number in the range.
-`while` - Runs in loop as long as the command returns `0`
+- `if` - Runs it's scope if the command returns `0`. Useful in pair with `test` builtin. `else` supported. `else if` doesn't require another `end`.
+- `for $val of @arr` - Runs for each value of the array (or hashmap)
+- `for $val of X..Y` - Runs for each number in the range `X` and `Y` (both inclusive).
+- `while` - Runs in loop as long as the command returns `0`
 
 ### Functions
 
-Defined by `fn name arg -- desc`. `arg` can be ommited, or repeated. `desc` will be printed when the `arg` is missing (or when `describe` command is used).
+Defined by `fn name [...arg] [--flags]`. `arg` can be ommited, or repeated.
+`--flags` can be used to add additional functionality.
 
-#### Special
+Functions are scoped per file, even if they use `on-event` or similar to be triggered.
+Use `source` to load external files with functions to be triggered.
 
-From config (defined by `~/.rushrc`), special functions can be defined.
-
-* `PROMPT` will be run to render the prompt
-* `HIGHLIGHT` will run (for each key - make it fast) to highlight the text.
+- `--desc` sets the functions description.
+- `--on-event` will run the function when an event is run
 
 #### Builtins
 
-* `let` for assigning variables
-* `export` for exporting variables to env
+`let` is a special case which cannot be dynamically addressed (i.e. using `$(echo let) var = value`).
+
+* `let` for assigning variables (`let var = value`)
+* `export` for exporting variables to env (`export var` to export var, or `export var = value`)
 * `test` tests for evaluation (`=` for equality, `>`, `<`, `<=`, `>=` for number comparisons)
 * `exists` for existance of a given string, or if given a flag (`-F`unctions, `-v`ariables, `-e`nv, `-f`ile, `-d`irectory, `-r`eadable file, `-w`ritable file, e`-x`ecutable file), existence of the selected object
 * `true` returns `0`
 * `false` returns `1`
+* `source` to run another file in the same file scope
 
 Some GNU standard utils may be overwritten by rush builtins, but must be made compatible.

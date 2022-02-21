@@ -71,19 +71,82 @@ impl Shell {
         let v = stdin.lock().lines().next().unwrap().unwrap();
         self.term.input = v;
     }
-}
 
-fn start_shell() {
-    let mut shell = Shell::new();
-    loop {
-        print!("$: ");
-        io::stdout().flush().unwrap();
-        shell.collect();
-        shell.term.input += "\n";
-        let res = parser::exec(&mut shell.term.input.as_bytes(), &mut shell.ctx);
-        match res {
-            Err(err) => eprintln!("rush: {}", err),
-            Ok(_) => {}
+
+    fn edit(&mut self) {
+        let stdin = io::stdin();
+        let mut stdout = io::stdout().into_raw_mode().unwrap();
+        for c in stdin.keys() {
+            let c = c.unwrap();
+            match c {
+                Key::Char('\n') => {
+                    if self.term.input.chars().nth(self.term.idx).unwrap_or(' ') == '\\' {
+                        self.term.insert_str(self.term.idx, "\\\n");
+                    } else {
+                        break;
+                    }
+                }
+                Key::Backspace => {
+                    if self.term.input.len() > 0 && self.term.idx > 0 {
+                        if self.term.idx == self.term.input.len() - 1 {
+                            self.term.input.pop();
+                        } else {
+                            self.term.remove(self.term.idx - 1);
+                        }
+                        self.term.idx -= 1;
+                    }
+                }
+                Key::Delete => {
+                    if self.term.idx < self.term.input.len() {
+                        self.term.remove(self.term.idx);
+                    }
+                }
+                Key::End => {
+                    self.term.idx = cmp::max(self.term.input.len(), 1) - 1;
+                }
+                Key::Home => {
+                    self.term.idx = 0;
+                }
+                Key::Left => {
+                    if self.term.idx > 0 {
+                        self.term.idx -= 1;
+                    }
+                }
+                Key::Right => {
+                    if self.term.idx < self.term.input.len() - 1 {
+                        self.term.idx += 1;
+                    }
+                }
+                Key::Ctrl('c') => {
+                    process::exit(1);
+                }
+                Key::Ctrl('d') => {
+                    process::exit(0);
+                }
+                Key::Char(char) => {
+                    self.term.insert(self.term.idx, char);
+                    self.term.idx += 1;
+                }
+                _ => {}
+            }
+            self.term.print(&mut stdout);
+            stdout.flush().unwrap();
+        }
+        stdout.suspend_raw_mode().unwrap();
+    }
+
+    fn start() {
+        let mut shell = Shell::new();
+        loop {
+            print!("$: ");
+            io::stdout().flush().unwrap();
+            shell.collect();
+            shell.term.input += "\n";
+            let res = parser::exec(&mut shell.term.input.as_bytes(), &mut shell.ctx);
+            match res {
+                Err(err) => eprintln!("rush: {}", err),
+                Ok(_) => {}
+            }
         }
     }
 }
@@ -127,7 +190,7 @@ fn main() {
         },
         None => {}
     };
-    start_shell();
+    Shell::start();
 }
 
 #[cfg(test)]
@@ -168,65 +231,4 @@ mod test {
     fn while_expr() -> Result<()> {
         load_and_run("test/while.rush")
     }
-}
-
-fn editor() -> Shell {
-    let stdin = io::stdin();
-    let mut stdout = io::stdout().into_raw_mode().unwrap();
-    let mut shell = Shell::new();
-    for c in stdin.keys() {
-        let c = c.unwrap();
-        match c {
-            Key::Char('\n') => {
-                if shell.term.input.chars().nth(shell.term.idx).unwrap_or(' ') == '\\' {
-                    shell.term.insert_str(shell.term.idx, "\\\n");
-                } else {
-                    break;
-                }
-            }
-            Key::Backspace => {
-                if shell.term.input.len() > 0 && shell.term.idx > 0 {
-                    if shell.term.idx == shell.term.input.len() - 1 {
-                        shell.term.input.pop();
-                    } else {
-                        shell.term.remove(shell.term.idx - 1);
-                    }
-                    shell.term.idx -= 1;
-                }
-            }
-            Key::Delete => {
-                if shell.term.idx < shell.term.input.len() {
-                    shell.term.remove(shell.term.idx);
-                }
-            }
-            Key::End => {
-                shell.term.idx = cmp::max(shell.term.input.len(), 1) - 1;
-            }
-            Key::Home => {
-                shell.term.idx = 0;
-            }
-            Key::Left => {
-                if shell.term.idx > 0 {
-                    shell.term.idx -= 1;
-                }
-            }
-            Key::Right => {
-                if shell.term.idx < shell.term.input.len() - 1 {
-                    shell.term.idx += 1;
-                }
-            }
-            Key::Ctrl('c') => {
-                process::exit(1);
-            }
-            Key::Char(char) => {
-                shell.term.insert(shell.term.idx, char);
-                shell.term.idx += 1;
-            }
-            _ => {}
-        }
-        shell.term.print(&mut stdout);
-        stdout.flush().unwrap();
-    }
-    stdout.suspend_raw_mode().unwrap();
-    shell
 }

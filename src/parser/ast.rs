@@ -1,4 +1,4 @@
-use crate::parser::tokens::Tokens;
+use crate::parser::tokens::{Token, Tokens};
 use anyhow::{bail, Context, Result};
 
 #[derive(Debug)]
@@ -126,7 +126,7 @@ pub enum Expression {
 
 #[derive(Debug)]
 struct Tree {
-    tokens: Vec<Tokens>,
+    tokens: Vec<Token>,
     i: usize
 }
 
@@ -177,7 +177,7 @@ impl Tree {
             buf.push(val);
             if self.i >= end - 1 { break }
             self.i += 1;
-            token = self.tokens.get(self.i).unwrap();
+            token = &self.tokens.get(self.i).unwrap().token;
             if matches!(token, Tokens::CommandEnd(_)) { break }
         }
         match &token {
@@ -196,7 +196,7 @@ impl Tree {
         self.inc();
         let mut len = 0;
         for token in &self.tokens[self.i..] {
-            match token {
+            match token.token {
                 Tokens::ExportSet => { break },
                 _ => len += 1
             }
@@ -218,7 +218,7 @@ impl Tree {
         let mut found_first = false;
         for token in &self.tokens[self.i..] {
             val_end += 1;
-            match token {
+            match token.token {
                 Tokens::Space => if found_first { break },
                 Tokens::CommandEnd(_) => if !found_first { bail!("Unexpected command end") } else { break },
                 Tokens::FileRead => bail!("Unexpected file read (<)"),
@@ -242,7 +242,7 @@ impl Tree {
         let mut found_first = false;
         for token in &self.tokens[self.i..] {
             val_end += 1;
-            match token {
+            match token.token {
                 Tokens::Space => if found_first { break },
                 Tokens::CommandEnd(_) => if !found_first { bail!("Unexpected command end") } else { break },
                 Tokens::FileRead => bail!("Unexpected file read (<)"),
@@ -381,7 +381,7 @@ impl Tree {
                     let mut lvl = 1;
                     self.inc();
                     for token in &self.tokens[self.i..] {
-                        match token {
+                        match token.token {
                             Tokens::SubStart => lvl += 1,
                             Tokens::StringFunction(_) => lvl += 1,
                             Tokens::ArrayFunction(_) => lvl += 1,
@@ -468,7 +468,7 @@ impl Tree {
                     let mut lvl = 1;
                     self.inc();
                     for token in &self.tokens[self.i..] {
-                        match token {
+                        match token.token {
                             Tokens::ParenthesisStart => lvl += 1,
                             Tokens::ParenthesisEnd => lvl -= 1,
                             _ => {}
@@ -547,11 +547,11 @@ impl Tree {
         self.i += 1;
         self
     }
-    fn get_current_token(&self) -> &Tokens { self.tokens.get(self.i).unwrap() }
-    fn get_next_token(&self) -> &Tokens { self.tokens.get(self.i + 1).unwrap() }
+    fn get_current_token(&self) -> &Tokens { &self.tokens.get(self.i).unwrap().token }
+    fn get_next_token(&self) -> &Tokens { &self.tokens.get(self.i + 1).unwrap().token }
 }
 
-pub fn build_tree(tokens: Vec<Tokens>) -> Result<Vec<Expression>> {
+pub fn build_tree(tokens: Vec<Token>) -> Result<Vec<Expression>> {
     let mut expressions: Vec<Expression> = Vec::new();
     let mut tree = Tree { tokens, i: 0 };
     loop {
