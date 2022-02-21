@@ -2,14 +2,17 @@ mod parser;
 
 use std::io::{self, BufRead, Stdout, Write};
 use std::cmp;
-use std::collections::HashMap;
 use std::convert::TryInto;
+use std::path::Path;
 use std::process;
-
+use clap::{Arg, Command, arg};
 use termion::raw::{IntoRawMode, RawTerminal};
 use termion::input::TermRead;
 use termion::cursor::{DetectCursorPos};
 use termion::event::*;
+use std::fs::File;
+use std::io::BufReader;
+use anyhow::Result;
 
 struct Term {
     input: String,
@@ -70,7 +73,7 @@ impl Shell {
     }
 }
 
-fn main() {
+fn start_shell() {
     let mut shell = Shell::new();
     loop {
         print!("$: ");
@@ -83,6 +86,48 @@ fn main() {
             Ok(_) => {}
         }
     }
+}
+
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+const AUTHORS: &str = env!("CARGO_PKG_AUTHORS");
+const DESCRIPTION: &str = env!("CARGO_PKG_DESCRIPTION");
+
+fn load_and_run<P: AsRef<Path>>(path: P) -> Result<()> {
+    let mut ctx = parser::vars::Context::new();
+    let src = File::open(path).unwrap();
+    parser::exec(&mut BufReader::new(src), &mut ctx)
+}
+
+fn main() {
+    let matches = Command::new("Rush")
+        .version(VERSION)
+        .author(AUTHORS)
+        .about(DESCRIPTION)
+        .arg(
+            arg!([file] "File to execute")
+        )
+        .arg(
+            arg!(-c --command <COMMAND> "Command to execute")
+                .required(false)
+        )
+        .get_matches();
+
+    match matches.value_of("command") {
+        Some(command) => {
+            let mut ctx = parser::vars::Context::new();
+            parser::exec(&mut command.as_bytes(), &mut ctx).unwrap();
+            return;
+        },
+        None => {}
+    };
+    match matches.value_of("file") {
+        Some(file) => {
+            load_and_run(file).unwrap();
+            return;
+        },
+        None => {}
+    };
+    start_shell();
 }
 
 #[cfg(test)]

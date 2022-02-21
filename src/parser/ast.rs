@@ -400,10 +400,8 @@ impl Tree {
                     if lvl != 0 {
                         bail!("Parenthesis do not match");
                     }
-                    dbg!(&self, len);
                     let val = Value::Expressions(self.parse_sub(self.i + len)?);
                     self.inc();
-                    dbg!(self);
                     return Ok(val);
                 },
                 Tokens::Else => buf.push(Value::Literal(token.to_str())),
@@ -444,12 +442,10 @@ impl Tree {
         let mut expr: Option<Expression> = None;
         let mut token = self.get_current_token();
         loop {
-            dbg!(token);
             match token {
                 Tokens::Space => {self.inc();},
                 Tokens::CommandEnd(_) => { if matches!(expr, Some(_)) { break }; self.inc();},
                 Tokens::Literal(_) => if matches!(expr, Some(_)) {
-                    dbg!(expr);
                     bail!("Unexpected literal. After file redirect, you need to use a semicolon or newline.");
                 } else {
                     expr = Some(self.parse_call(end)?);
@@ -498,14 +494,14 @@ impl Tree {
                     _ => expr = Some(self.parse_call(end)?)
                 },
                 Tokens::Else => bail!("Unexpected token ELSE"),
-                Tokens::End => { dbg!(expr); bail!("Unexpected token END"); },
+                Tokens::End => { bail!("Unexpected token END"); },
                 Tokens::For => match expr {
                     Some(_) => bail!("Commands must be ended properly"),
                     None => expr = Some(Expression::ForExpression(self.parse_for(end)?)),
                 },
                 Tokens::If => match expr {
                     Some(_) => bail!("Commands must be ended properly"),
-                    None => {expr = Some(Expression::IfExpression(self.parse_if(end)?)); dbg!(&expr); },
+                    None => {expr = Some(Expression::IfExpression(self.parse_if(end)?)); },
                 }
                 Tokens::Let => return Ok(self.parse_let(end)?),
                 Tokens::While => return Ok(Expression::WhileExpression(self.parse_while(end)?)),
@@ -539,7 +535,6 @@ impl Tree {
                 Tokens::JobCommandEnd => bail!("Jobs not yet implemented")
             }
             if self.i >= end - 1 { break }
-            dbg!("finished loop", &expr);
             token = self.get_current_token();
         }
         match expr {
@@ -566,7 +561,6 @@ pub fn build_tree(tokens: Vec<Tokens>) -> Result<Vec<Expression>> {
             Ok(val) => expressions.push(val),
             Err(error) => {
                 if error.to_string() == "No expression found" { break }
-                dbg!(tree);
                 return Err(error);
             }
         }

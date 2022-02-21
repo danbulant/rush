@@ -13,8 +13,6 @@ pub fn exec(reader: &mut dyn std::io::BufRead, ctx: &mut vars::Context) -> Resul
 
     let expressions = build_tree(tokens)?;
 
-    dbg!(&expressions);
-
     exec_tree(expressions, ctx)?;
     Ok(())
 }
