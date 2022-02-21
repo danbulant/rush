@@ -175,11 +175,13 @@ pub fn tokenize(reader: &mut dyn std::io::BufRead) -> Result<Vec<Tokens>> {
             ';' | '\r' | '\n' => if !escape_active && !quote_active && !double_quote_active {
                 save_buf(&mut buf, &mut tokens);
                 tokens.push(Tokens::CommandEnd(letter.clone()));
-                let mut x = i;
+                let mut x = 0;
                 while x < text.len() - 1 && matches!(text.chars().nth(x).unwrap(), '\n' | '\r' | ';' | ' ') {
                     x += 1;
                 }
-                skipper = x - i - 1;
+                if x > 0 {
+                    skipper = x - 1;
+                }
                 buf_add = false;
             },
             '&' => if !escape_active && !quote_active && !double_quote_active {
@@ -233,6 +235,15 @@ pub fn tokenize(reader: &mut dyn std::io::BufRead) -> Result<Vec<Tokens>> {
                 tokens.push(Tokens::ExportSet);
                 buf_add = false;
             },
+            '#' => if !escape_active && !quote_active && !double_quote_active {
+                save_buf(&mut buf, &mut tokens);
+                buf_add = false;
+                let mut x = 0;
+                while x + i + 1 < text.len() && text.chars().nth(x + i + 1).unwrap() != '\n' {
+                    x += 1;
+                }
+                skipper = x;
+            }
             _ => {}
         }
         if letter.clone() != '\\' { escape_active = false; }

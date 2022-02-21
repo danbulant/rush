@@ -1,12 +1,3 @@
-
-if true
-    echo condition true
-end
-
-if false
-    echo condition false
-end
-
 if true
     echo condition true
 else

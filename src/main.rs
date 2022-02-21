@@ -110,8 +110,13 @@ mod test {
     }
 
     #[test]
-    fn if_expr() -> Result<()> {
-        load_and_run("test/if.rush")
+    fn if_base() -> Result<()> {
+        load_and_run("test/base_if.rush")
+    }
+
+    #[test]
+    fn if_else() -> Result<()> {
+        load_and_run("test/if_else.rush")
     }
 
     #[test]

@@ -275,33 +275,70 @@ impl Tree {
     fn parse_if(&mut self, end: usize) -> Result<IfExpression> {
         self.inc();
         let condition = self.get_expression(end).with_context(|| "Error getting condition for if expression")?;
-        dbg!(&condition);
         let mut contents = Vec::new();
         loop {
-            match self.get_next_token() {
+            match self.get_current_token() {
                 Tokens::End => break,
-                Tokens::Space => { self.inc(); },
+                Tokens::Space => {},
+                Tokens::Else => break,
+                Tokens::CommandEnd(_) => {}
                 _ => contents.push(self.get_expression(end).with_context(|| "Error getting contents for if expression")?)
             };
+            self.inc();
+        }
+        loop {
+            match self.get_current_token() {
+                Tokens::CommandEnd(_) => { self.inc(); },
+                Tokens::Space => { self.inc(); },
+                _ => break
+            }
         }
         let mut else_contents = Vec::new();
+        if matches!(self.get_current_token(), Tokens::Else) {
+            self.inc();
+            loop {
+                match self.get_current_token() {
+                    Tokens::End => break,
+                    Tokens::Space => {},
+                    Tokens::CommandEnd(_) => {}
+                    Tokens::Else => break,
+                    Tokens::If => {
+                        else_contents.push(self.get_expression(end).with_context(|| "Error getting contents for if expression")?);
+                        if else_contents.len() == 1 { break };
+                    }
+                    _ => else_contents.push(self.get_expression(end).with_context(|| "Error getting contents for if expression")?)
+                };
+                self.inc();
+            }
+        }
+        if self.i < self.tokens.len() {
+            loop {
+                match self.get_current_token() {
+                    Tokens::CommandEnd(_) => { self.inc(); },
+                    Tokens::Space => { self.inc(); },
+                    _ => break
+                }
+                if self.i >= self.tokens.len() - 1 { break }
+            }
+            self.inc();
+        }
         Ok(IfExpression { condition: Box::new(condition), contents, else_contents })
     }
 
     fn parse_while(&mut self, end: usize) -> Result<WhileExpression> {
         self.inc();
         let condition = self.get_expression(end).with_context(|| "Error getting condition for while expression")?;
-        dbg!(&condition);
-        dbg!(self.i);
         let mut contents = Vec::new();
+        self.inc();
         loop {
-            let token = self.get_next_token();
-            dbg!(token, matches!(token, Tokens::End));
+            let token = self.get_current_token();
             match token {
                 Tokens::End => break,
+                Tokens::Else => bail!("Unexpected ELSE. Support for ELSE statements after WHILE may come later."),
+                Tokens::CommandEnd(_) => { self.inc(); },
+                Tokens::Space => { self.inc(); },
                 _ => contents.push(self.get_expression(end).with_context(|| "Error getting contents for while expression")?)
             };
-            dbg!(&contents);
         }
         self.inc();
         Ok(WhileExpression { condition: Box::new(condition), contents })
@@ -404,9 +441,10 @@ impl Tree {
     }
 
     fn get_expression(&mut self, end: usize) -> Result<Expression> {
-        let mut token = self.get_current_token();
         let mut expr: Option<Expression> = None;
+        let mut token = self.get_current_token();
         loop {
+            dbg!(token);
             match token {
                 Tokens::Space => {self.inc();},
                 Tokens::CommandEnd(_) => { if matches!(expr, Some(_)) { break }; self.inc();},
@@ -460,14 +498,14 @@ impl Tree {
                     _ => expr = Some(self.parse_call(end)?)
                 },
                 Tokens::Else => bail!("Unexpected token ELSE"),
-                Tokens::End => bail!("Unexpected token END\nCurrent expression:{:?}", expr),
+                Tokens::End => { dbg!(expr); bail!("Unexpected token END"); },
                 Tokens::For => match expr {
                     Some(_) => bail!("Commands must be ended properly"),
                     None => expr = Some(Expression::ForExpression(self.parse_for(end)?)),
                 },
                 Tokens::If => match expr {
                     Some(_) => bail!("Commands must be ended properly"),
-                    None => expr = Some(Expression::IfExpression(self.parse_if(end)?)),
+                    None => {expr = Some(Expression::IfExpression(self.parse_if(end)?)); dbg!(&expr); },
                 }
                 Tokens::Let => return Ok(self.parse_let(end)?),
                 Tokens::While => return Ok(Expression::WhileExpression(self.parse_while(end)?)),
@@ -501,6 +539,7 @@ impl Tree {
                 Tokens::JobCommandEnd => bail!("Jobs not yet implemented")
             }
             if self.i >= end - 1 { break }
+            dbg!("finished loop", &expr);
             token = self.get_current_token();
         }
         match expr {
@@ -526,6 +565,7 @@ pub fn build_tree(tokens: Vec<Tokens>) -> Result<Vec<Expression>> {
         match val {
             Ok(val) => expressions.push(val),
             Err(error) => {
+                if error.to_string() == "No expression found" { break }
                 dbg!(tree);
                 return Err(error);
             }

@@ -215,21 +215,20 @@ impl ExecExpression for IfExpression {
             None => bail!("Invalid IF expression"),
             Some(cmd) => cmd
         };
+        ctx.add_scope();
         let res = match condition.spawn() {
             Result::Err(_) => {
-                Some(condition)
+                self.else_contents.exec(ctx)?
             },
             Result::Ok(mut res) => {
                 if !res.wait()?.success() {
-                    Some(condition)
+                    self.else_contents.exec(ctx)?
                 } else {
-                    ctx.add_scope();
-                    let res = self.contents.exec(ctx)?;
-                    ctx.pop_scope();
-                    res
+                    self.contents.exec(ctx)?
                 }
             }
         };
+        ctx.pop_scope();
 
         Ok(res)
     }
