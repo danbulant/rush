@@ -131,5 +131,32 @@ pub fn get_native_functions() -> HashMap<String, NativeFunction> {
         func: rush_typeof
     });
 
+    fn rush_length(_ctx: &mut Context, args: Vec<Variable>) -> Result<Variable> {
+        if args.len() != 1 {
+            return Ok(Variable::I64(args.len() as i64));
+        }
+        let arg = args.get(0).unwrap();
+        let res = match arg {
+            Variable::String(s) => s.len(),
+            Variable::Array(a) => a.len(),
+            Variable::HMap(h) => h.len(),
+            _ => bail!("Unsupported type")
+        };
+        Ok(Variable::I64(res as i64))
+    }
+    map.insert("length".to_string(), NativeFunction {
+        name: "length".to_string(),
+        description: "Returns the length of a string, array or hashmap".to_string(),
+        args: vec![String::from("var")],
+        func: rush_length
+    });
+
+    map.insert("$length".to_string(), NativeFunction {
+        name: "$length".to_string(),
+        description: "Returns the length of a string, array or hashmap".to_string(),
+        args: vec![String::from("var")],
+        func: rush_length
+    });
+
     map
 }
