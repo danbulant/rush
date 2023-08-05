@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::process::{Child, Command, Stdio};
 use std::io;
-use crate::parser::ast::{AndExpression, BreakExpression, CommandValue, Expression, FileSourceExpression, FileTargetExpression, IfExpression, LetExpression, OrExpression, RedirectTargetExpression, Value, WhileExpression};
+use crate::parser::ast::{AndExpression, BreakExpression, CommandValue, Expression, FileSourceExpression, FileTargetExpression, ForExpression, IfExpression, LetExpression, OrExpression, RedirectTargetExpression, Value, WhileExpression};
 use crate::parser::vars;
 use crate::parser::vars::{AnyFunction, Context, Variable};
 use anyhow::{Result, bail, Context as AnyhowContext};
@@ -50,7 +50,7 @@ impl ExecResult {
                 self.spawn();
                 let child = self.child.unwrap();
                 let mut stdout = child.stdout.unwrap();
-                io::copy(&mut stdout, into);
+                io::copy(&mut stdout, into).unwrap();
             }
         }
         into
@@ -59,7 +59,7 @@ impl ExecResult {
     ///
     /// Uses `redirect_from_result` of the next result. Spawns this result, but not the next one.
     fn redirect_into_result(&mut self, into: &mut ExecResult) -> &mut Self {
-        into.redirect_from_result(self);
+        into.redirect_from_result(self).unwrap();
         self
     }
     /// Redirects the `from` into the current pending result
@@ -167,7 +167,7 @@ impl ExecExpression for Expression {
             Expression::Function(_) => todo!("Function definition"),
             Expression::IfExpression(expr) => expr.exec(ctx),
             Expression::WhileExpression(expr) => expr.exec(ctx),
-            Expression::ForExpression(_) => todo!("For expression"),
+            Expression::ForExpression(expr) => expr.exec(ctx),
             Expression::RedirectTargetExpression(expr) => expr.exec(ctx),
             Expression::FileTargetExpression(expr) => expr.exec(ctx),
             Expression::FileSourceExpression(expr) => expr.exec(ctx),
@@ -197,18 +197,24 @@ impl ExecExpression for WhileExpression {
             Some(cmd) => cmd
         };
         ctx.add_scope();
-        let mut res;
+        let mut res = None;
         loop {
             match condition.spawn() {
-                Result::Err(_) => {
+                Err(_) => {
                     res = Some(condition);
                     break;
                 },
-                Result::Ok(mut child) => {
+                Ok(mut child) => {
                     if !child.wait()?.success() {
                         res = Some(condition);
                         break
                     } else {
+                        match res {
+                            None => {},
+                            Some(mut cmd) => {
+                                wait_child(cmd.spawn()?, ctx)?;
+                            }
+                        }
                         res = self.contents.exec(ctx)?
                     }
                 }
@@ -219,6 +225,80 @@ impl ExecExpression for WhileExpression {
             }
         }
         ctx.pop_scope();
+
+        Ok(res)
+    }
+}
+
+impl ExecExpression for ForExpression {
+    fn exec<'a>(&mut self, ctx: &mut Context) -> Result<Option<Command>> {
+        if ctx.break_num > 0 { ctx.break_num -= 1; return Ok(None) }
+        let arg_value = self.arg_value.get(ctx)?;
+        let arg_key = match &self.arg_key {
+            None => None,
+            Some(key) => {
+                let mut lkey: Value = key.clone();
+                let res = lkey.get(ctx)?;
+                Some(res)
+            }
+        };
+        let mut res: Option<Command> = None;
+        let list = self.list.get(ctx)?;
+
+        fn process(i: usize, val: Variable, ctx: &mut Context, arg_key: &Option<Variable>, arg_value: &Variable) -> Result<()> {
+            ctx.add_scope();
+            if let Some(key) = &arg_key {
+                ctx.set_var(key.to_string(), Variable::U64(i as u64));
+            }
+            ctx.set_var(arg_value.to_string(), val);
+            Ok(())
+        }
+
+        match list {
+            Variable::Array(arr) => {
+                if arr.is_empty() {
+                    self.else_contents.exec(ctx)?;
+                } else {
+                    for (i, val) in arr.iter().enumerate() {
+                        process(i, val.clone(), ctx, &arg_key, &arg_value)?;
+                        match res {
+                            None => {},
+                            Some(mut cmd) => {
+                                wait_child(cmd.spawn()?, ctx)?;
+                            }
+                        }
+                        res = self.contents.exec(ctx)?;
+                        ctx.pop_scope();
+                        if ctx.break_num > 0 {
+                            ctx.break_num -= 1;
+                            break;
+                        }
+                    }
+                }
+            },
+            Variable::String(str) => {
+                if str.is_empty() {
+                    self.else_contents.exec(ctx)?;
+                } else {
+                    for (i, char) in str.chars().enumerate() {
+                        process(i, Variable::String(char.to_string()), ctx, &arg_key, &arg_value)?;
+                        match res {
+                            None => {},
+                            Some(mut cmd) => {
+                                wait_child(cmd.spawn()?, ctx)?;
+                            }
+                        }
+                        res = self.contents.exec(ctx)?;
+                        ctx.pop_scope();
+                        if ctx.break_num > 0 {
+                            ctx.break_num -= 1;
+                            break;
+                        }
+                    }
+                }
+            },
+            _ => bail!("Invalid for expression")
+        };
 
         Ok(res)
     }
@@ -264,10 +344,10 @@ impl ExecExpression for Vec<CommandValue> {
     fn exec(self: &mut Vec<CommandValue>, ctx: &mut vars::Context) -> Result<Option<Command>> {
         if ctx.break_num > 0 { return Ok(None) }
         if self.is_empty() { bail!("Command with 0 length"); }
-        let mut first = self.remove(0);
+        let first = self.get_mut(0).unwrap();
         let command_name = first.get(ctx)?.to_string();
         let mut cmd = Command::new(command_name);
-        for value in self {
+        for value in &mut self[1..] {
             cmd.arg(value.get(ctx)?.to_string());
         }
         Ok(Some(cmd))
@@ -412,6 +492,12 @@ impl ExecExpression for AndExpression {
     }
 }
 
+fn wait_child(mut child: Child, ctx: &mut Context) -> Result<()> {
+    let out = child.wait()?;
+    ctx.set_var(String::from("?"), Variable::I32(out.code().unwrap_or(1)));
+    Ok(())
+}
+
 pub fn exec_tree(tree: Vec<Expression>, ctx: &mut vars::Context) -> Result<()> {
     for mut expression in tree {
         let cmd = expression.exec(ctx)?;
@@ -422,8 +508,7 @@ pub fn exec_tree(tree: Vec<Expression>, ctx: &mut vars::Context) -> Result<()> {
                     println!("Error executing: {}", e);
                 },
                 Result::Ok(mut res) => {
-                    let out = res.wait()?;
-                    ctx.set_var(String::from("?"), Variable::I32(out.code().unwrap_or(1)));
+                    wait_child(res, ctx)?;
                 }
             }
         }

@@ -91,8 +91,8 @@ Slices: `[x..y]` gets a substring (or subarray) of the variable. When `x` ommite
 Bracketless. Scopes are ended by the keyword `end`.
 
 - `if` - Runs it's scope if the command returns `0`. Useful in pair with `test` builtin. `else` supported. `else if` doesn't require another `end`.
-- `for $val of @arr` - Runs for each value of the array (or hashmap)
-- `for $val of X..Y` - Runs for each number in the range `X` and `Y` (both inclusive).
+- `for val of @arr` - Runs for each value of the array (or hashmap)
+- `for val of X..Y` - Runs for each number in the range `X` and `Y` (both inclusive).
 - `while` - Runs in loop as long as the command returns `0`
 
 ### Functions
@@ -113,9 +113,11 @@ Use `source` to load external files with functions to be triggered.
 * `let` for assigning variables (`let var = value`)
 * `export` for exporting variables to env (`export var` to export var, or `export var = value`)
 * `test` tests for evaluation (`=` for equality, `>`, `<`, `<=`, `>=` for number comparisons)
-* `exists` for existance of a given string, or if given a flag (`-F`unctions, `-v`ariables, `-e`nv, `-f`ile, `-d`irectory, `-r`eadable file, `-w`ritable file, e`-x`ecutable file), existence of the selected object
+* `exists` for existence of a given string, or if given a flag (`-F`unctions, `-v`ariables, `-e`nv, `-f`ile, `-d`irectory, `-r`eadable file, `-w`ritable file, e`-x`ecutable file), existence of the selected object
 * `true` returns `0`
 * `false` returns `1`
 * `source` to run another file in the same file scope
+* `typeof` returns the type of arguments passed
+* `inspect` shows the object in a debug output
 
 Some GNU standard utils may be overwritten by rush builtins, but must be made compatible.

@@ -1,58 +1,60 @@
 use crate::parser::tokens::{Token, Tokens};
 use anyhow::{bail, Context, Result};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LetExpression {
     pub key: Box<Value>,
     pub vartype: Option<String>,
     pub value: Box<Value>
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AndExpression {
     pub first: Box<Expression>,
     pub second: Box<Expression>
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OrExpression {
     pub first: Box<Expression>,
     pub second: Box<Expression>
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IfExpression {
     pub condition: Box<Expression>,
     pub contents: Vec<Expression>,
     pub else_contents: Vec<Expression>
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct WhileExpression {
     pub condition: Box<Expression>,
     pub contents: Vec<Expression>
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ForExpression {
-    pub key: String,
-    pub list: Box<Value>,
-    pub contents: Vec<Expression>
+    pub arg_value: Value,
+    pub arg_key: Option<Value>,
+    pub list: Value,
+    pub contents: Vec<Expression>,
+    pub else_contents: Vec<Expression>
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ForValue {
     Value(Value),
     Range(Option<u32>, Option<u32>)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DefinedFunctionCall {
     pub name: String,
     pub args: Vec<Value>
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Value {
     Literal(String),
     Variable(String),
@@ -63,13 +65,13 @@ pub enum Value {
     Values(Vec<Value>)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FunctionVariable {
     pub name: String,
     pub vartype: Option<String>
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FunctionDefinitionExpression {
     pub name: String,
     pub description: Option<String>,
@@ -78,36 +80,36 @@ pub struct FunctionDefinitionExpression {
     pub body: Box<Expression>
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RedirectTargetExpression {
     pub source: Box<Expression>,
     pub target: Box<Expression>
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FileTargetExpression {
     pub source: Option<Box<Expression>>,
     pub target: Box<Value>
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FileSourceExpression {
     pub source: Box<Value>,
     pub target: Option<Box<Expression>>
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum CommandValue {
     Value(Value),
     Var(String, Value)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BreakExpression {
     pub num: Box<Value>
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Expression {
     LetExpression(LetExpression),
     Command(Vec<CommandValue>),
@@ -278,7 +280,7 @@ impl Tree {
                 String::from("$") + str
             }
             _ => bail!("Expected string or array function - internal error")
-        }.clone();
+        };
         let mut args = Vec::new();
         self.inc();
         loop {
@@ -290,30 +292,48 @@ impl Tree {
         Ok(DefinedFunctionCall { name, args })
     }
 
-    fn parse_for(&mut self, _end: usize) -> Result<ForExpression> {
-        bail!("For loop not yet implemented");
-    }
-
-    fn parse_if(&mut self, end: usize) -> Result<IfExpression> {
+    fn parse_for(&mut self, end: usize) -> Result<ForExpression> {
         self.inc();
-        let condition = self.get_expression(end).with_context(|| "Error getting condition for if expression")?;
+        let arg_value = self.get_value(end, true)?;
+        let arg_key = match self.get_value(end, true)? {
+            Value::Literal(k) if k == "in" => None,
+            any => Some(any)
+        };
+        if matches!(arg_key, Some(_)) {
+            match self.get_value(end, true)? {
+                Value::Literal(k) if k == "in" => {},
+                _ => bail!("Expected 'in' after for key")
+            }
+            self.inc();
+        }
+        let list = self.get_value(end, false)?;
+
         let mut contents = Vec::new();
+
         loop {
             match self.get_current_token() {
                 Tokens::End => break,
                 Tokens::Space => {},
                 Tokens::Else => break,
                 Tokens::CommandEnd(_) => {}
-                _ => contents.push(self.get_expression(end).with_context(|| "Error getting contents for if expression")?)
-            };
+                _ => contents.push(self.get_expression(end).with_context(|| "Error getting contents for for expression")?)
+            }
+            if self.i >= end - 1 { break }
             self.inc();
         }
+        let else_contents = self.parse_else(end)?;
+
+        Ok(ForExpression { arg_key, arg_value, contents, else_contents, list })
+    }
+
+    fn parse_else(&mut self, end: usize) -> Result<Vec<Expression>> {
         loop {
             match self.get_current_token() {
                 Tokens::CommandEnd(_) => { self.inc(); },
                 Tokens::Space => { self.inc(); },
                 _ => break
             }
+            if self.i >= end - 1 { return Ok(Vec::new()) }
         }
         let mut else_contents = Vec::new();
         if matches!(self.get_current_token(), Tokens::Else) {
@@ -331,19 +351,39 @@ impl Tree {
                     _ => else_contents.push(self.get_expression(end).with_context(|| "Error getting contents for if expression")?)
                 };
                 self.inc();
+                if self.i >= end { break }
             }
         }
-        if self.i < self.tokens.len() {
+        if self.i < end {
             loop {
                 match self.get_current_token() {
                     Tokens::CommandEnd(_) => { self.inc(); },
                     Tokens::Space => { self.inc(); },
                     _ => break
                 }
-                if self.i >= self.tokens.len() - 1 { break }
+                if self.i >= end - 1 { break }
             }
             self.inc();
         }
+        Ok(else_contents)
+    }
+
+    fn parse_if(&mut self, end: usize) -> Result<IfExpression> {
+        self.inc();
+        let condition = self.get_expression(end).with_context(|| "Error getting condition for if expression")?;
+        let mut contents = Vec::new();
+        loop {
+            match self.get_current_token() {
+                Tokens::End => break,
+                Tokens::Space => {},
+                Tokens::Else => break,
+                Tokens::CommandEnd(_) => {}
+                _ => contents.push(self.get_expression(end).with_context(|| "Error getting contents for if expression")?)
+            };
+            self.inc();
+            if self.i >= end { break }
+        }
+        let else_contents = self.parse_else(end)?;
         Ok(IfExpression { condition: Box::new(condition), contents, else_contents })
     }
 
@@ -377,10 +417,10 @@ impl Tree {
 
     fn parse_array_definition(&mut self, end: usize) -> Result<Vec<Value>> {
         let mut values: Vec<Value> = Vec::new();
-        if matches!(self.get_current_token(), Tokens::Space) { self.inc(); }
         loop {
-            if self.i >= end - 1 { break; }
+            if self.i >= end { break; }
             let val = self.get_value(end, true)?;
+            self.inc();
             values.push(val);
             if matches!(self.get_current_token(), Tokens::Space) { self.inc(); }
         }
@@ -415,8 +455,8 @@ impl Tree {
         loop {
             match token {
                 Tokens::Space => {
-                    if stop_on_space { break; }
                     if buf.is_empty() { token = self.inc().get_current_token(); continue; }
+                    if stop_on_space { break; }
                     values.push(Value::Values(buf));
                     buf = Vec::new();
                     if self.i >= end - 1 { break }
@@ -453,16 +493,15 @@ impl Tree {
                         if lvl == 0 {
                             break;
                         }
+                        len += 1;
 
                         if len + self.i == end { break }
-                        len += 1;
                     }
                     if lvl != 0 {
                         bail!("Parenthesis do not match");
                     }
                     let val = Value::ArrayDefinition(self.parse_array_definition(self.i + len)?);
                     values.push(val);
-                    self.inc();
                 },
                 Tokens::ArrayEnd => bail!("Unexpected token ARRAY END (])"),
                 Tokens::SubStart => {
@@ -599,7 +638,7 @@ impl Tree {
                     Some(_) => bail!("Unexpected break")
                 }
                 Tokens::JobCommandEnd => bail!("Jobs not yet implemented")
-            }
+            };
             if self.i >= end - 1 { break }
             token = self.get_current_token();
         }
@@ -614,7 +653,6 @@ impl Tree {
         self
     }
     fn get_current_token(&self) -> &Tokens { &self.tokens.get(self.i).unwrap().token }
-    fn get_next_token(&self) -> &Tokens { &self.tokens.get(self.i + 1).unwrap().token }
 }
 
 pub fn build_tree(tokens: Vec<Token>) -> Result<Vec<Expression>> {

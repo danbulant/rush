@@ -15,7 +15,8 @@ pub enum Variable {
     F32(f32),
     F64(f64),
     HMap(HashMap<String, Variable>),
-    Array(Vec<Variable>)
+    Array(Vec<Variable>),
+    Bool(bool)
 }
 
 impl Display for Variable {
@@ -32,6 +33,13 @@ impl Display for Variable {
             Variable::U128(num) => num.to_string(),
             Variable::F32(num) => num.to_string(),
             Variable::F64(num) => num.to_string(),
+            Variable::Bool(val) => {
+                if *val {
+                    String::from("true")
+                } else {
+                    String::from("false")
+                }
+            },
             Variable::HMap(_map) => {
                 String::from("[Object object]")
             },

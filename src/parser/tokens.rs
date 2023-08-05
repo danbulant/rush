@@ -167,12 +167,13 @@ pub fn tokenize(reader: &mut dyn std::io::BufRead) -> Result<Vec<Token>> {
                     buf_add = false;
                 } else {
                     let (mut skippers, mut token) = read_var_ahead(i, &text)?;
-                    skippers += 1;
                     match token.token {
-                        Tokens::StringVariable(ref str, bool) => if !bool && !double_quote_active && text.len() > i + skippers && text.chars().nth(i + skippers).unwrap() == '(' {
+                        Tokens::StringVariable(ref str, bool) => if !bool && !double_quote_active && text.len() > i + skippers + 1 && text.chars().nth(i + skippers + 1).unwrap() == '(' {
+                            skippers += 1;
                             token = Token { token: Tokens::StringFunction(str.clone()), end: i + skippers, start: i };
                         },
-                        Tokens::ArrayVariable(ref str, bool) => if !bool && !double_quote_active && text.len() > i + skippers && text.chars().nth(i + skippers).unwrap() == '(' {
+                        Tokens::ArrayVariable(ref str, bool) => if !bool && !double_quote_active && text.len() > i + skippers + 1 && text.chars().nth(i + skippers + 1).unwrap() == '(' {
+                            skippers += 1;
                             token = Token { token: Tokens::ArrayFunction(str.clone()), end: i+skippers, start: i };
                         }
                         _ => bail!("Cannot happen")
