@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use anyhow::{bail, Result};
 use crate::parser::ast::FunctionDefinitionExpression;
 
@@ -54,6 +54,17 @@ impl Display for Variable {
             }
         })
     }
+}
+
+pub fn variables_to_string(vars: Vec<Variable>) -> String {
+    let mut str = String::new();
+    for (i, var) in vars.iter().enumerate() {
+        str += &*var.clone().to_string();
+        if i < vars.len() - 1 {
+            str += " ";
+        }
+    }
+    str
 }
 
 impl Variable {
@@ -134,6 +145,24 @@ impl Variable {
     }
 }
 
+pub struct NativeFunction {
+    pub name: String,
+    pub description: String,
+    pub args: Vec<String>,
+    pub func: fn(&mut Context, Vec<Variable>) -> Result<Variable>
+}
+
+impl Debug for NativeFunction {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "NativeFunction {{ name: {}, description: {} }}", self.name, self.description)
+    }
+}
+
+pub enum AnyFunction<'a> {
+    Native(&'a mut NativeFunction),
+    UserDefined(&'a mut FunctionDefinitionExpression)
+}
+
 #[derive(Debug)]
 pub struct Scope {
     /// list of variables
@@ -147,8 +176,13 @@ pub struct Scope {
 #[derive(Debug)]
 pub struct Context {
     pub scopes: Vec<Scope>,
-    pub exports: HashMap<String, String>,
+    /// env variables
+    pub exports: HashMap<String, Variable>,
+    /// list of native functions (Rust functions)
+    pub native_func: HashMap<String, NativeFunction>,
+    /// number of break statements called
     pub break_num: u16,
+    /// number of continue statements called
     pub continue_num: u16
 }
 
@@ -157,16 +191,17 @@ impl Context {
         let mut res = Context {
             scopes: Vec::new(),
             exports: HashMap::new(),
+            native_func: HashMap::new(),
             break_num: 0,
             continue_num: 0
         };
         res.add_scope();
         res
     }
-    pub fn pop_scope(self: &mut Self) -> Option<Scope> {
+    pub fn pop_scope(&mut self) -> Option<Scope> {
         self.scopes.pop()
     }
-    pub fn add_scope(self: &mut Self) {
+    pub fn add_scope(&mut self) {
         let scope = Scope {
             func: HashMap::new(),
             vars: HashMap::new(),
@@ -175,7 +210,16 @@ impl Context {
         self.scopes.push(scope);
     }
 
-    pub fn get_var(self: &mut Self, var: &str) -> Option<&mut Variable> {
+    pub fn get_var(&mut self, var: &str) -> Option<&mut Variable> {
+        if var.starts_with("env::") {
+            let key = var.replace("env::", "");
+            return match self.exports.get_mut(&key) {
+                Some(val) => {
+                    return Some(val);
+                },
+                None => None
+            }
+        }
         for scope in self.scopes.iter_mut().rev() {
             let vars = &mut scope.vars;
             let val = vars.get_mut(var);
@@ -191,25 +235,36 @@ impl Context {
 
     pub fn set_var(&mut self, key: String, val: Variable) {
         let vars = &mut self.scopes.last_mut().unwrap().vars;
+        if key.starts_with("env::") {
+            let key = key.replace("env::", "");
+            self.exports.insert(key, Variable::String(val.to_string()));
+        }
         vars.insert(key, val);
     }
 
-    pub fn get_func(self: &mut Self, key: &str) -> Option<&mut FunctionDefinitionExpression> {
+    pub fn get_func(&mut self, key: &str) -> Option<AnyFunction> {
         for scope in self.scopes.iter_mut().rev() {
             let funcs = &mut scope.func;
             let val = funcs.get_mut(key);
             match val {
                 None => {}
                 Some(val) => {
-                    return Some(val);
+                    return Some(AnyFunction::UserDefined(val));
                 }
+            }
+        }
+        let val = self.native_func.get_mut(key);
+        match val {
+            None => {}
+            Some(val) => {
+                return Some(AnyFunction::Native(val));
             }
         }
         None
     }
 
     pub fn set_func(&mut self, key: String, val: FunctionDefinitionExpression) {
-        let mut func = &mut self.scopes.last_mut().unwrap().func;
+        let func = &mut self.scopes.last_mut().unwrap().func;
         func.insert(key, val);
     }
 }

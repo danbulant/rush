@@ -166,7 +166,8 @@ pub fn tokenize(reader: &mut dyn std::io::BufRead) -> Result<Vec<Token>> {
                     skipper = 1;
                     buf_add = false;
                 } else {
-                    let (skippers, mut token) = read_var_ahead(i, &text)?;
+                    let (mut skippers, mut token) = read_var_ahead(i, &text)?;
+                    skippers += 1;
                     match token.token {
                         Tokens::StringVariable(ref str, bool) => if !bool && !double_quote_active && text.len() > i + skippers && text.chars().nth(i + skippers).unwrap() == '(' {
                             token = Token { token: Tokens::StringFunction(str.clone()), end: i + skippers, start: i };

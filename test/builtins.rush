@@ -1,0 +1,1 @@
+test $trim("test  ") = "test"

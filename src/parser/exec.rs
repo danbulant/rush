@@ -3,7 +3,7 @@ use std::process::{Child, Command, Stdio};
 use std::io;
 use crate::parser::ast::{AndExpression, BreakExpression, CommandValue, Expression, FileSourceExpression, FileTargetExpression, IfExpression, LetExpression, OrExpression, RedirectTargetExpression, Value, WhileExpression};
 use crate::parser::vars;
-use crate::parser::vars::{Context, Variable};
+use crate::parser::vars::{AnyFunction, Context, Variable};
 use anyhow::{Result, bail, Context as AnyhowContext};
 
 trait ExecExpression {
@@ -112,10 +112,8 @@ impl GetValue for Value {
             Value::Literal(str) => {
                 Ok(Variable::String(str.clone()))
             },
-            Value::Variable(str) => Ok(ctx.get_var(&str).unwrap_or(&mut Variable::String(String::from(""))).clone()),
-            Value::ArrayVariable(str) => Ok(ctx.get_var(&str).unwrap_or(&mut Variable::Array(Vec::new())).clone()),
-            Value::ArrayFunction(_) => todo!("Not implemented yet"),
-            Value::StringFunction(_) => todo!("Not implemented yet"),
+            Value::Variable(str) => Ok(ctx.get_var(str).unwrap_or(&mut Variable::String(String::from(""))).clone()),
+            Value::ArrayVariable(str) => Ok(ctx.get_var(str).unwrap_or(&mut Variable::Array(Vec::new())).clone()),
             Value::Expressions(expressions) => {
                 let mut out = String::new();
                 ctx.add_scope();
@@ -138,8 +136,26 @@ impl GetValue for Value {
                 }
                 Ok(Variable::Array(out))
             }
+            Value::ValueFunction(call) => {
+                let args = get_variables(ctx, &mut call.args)?;
+                let func = ctx.get_func(call.name.as_str()).with_context(|| format!("Function {} not found", call.name))?;
+                match func {
+                    AnyFunction::Native(func) => {
+                        (func.func)(ctx, args)
+                    }
+                    AnyFunction::UserDefined(_) => todo!("User defined functions are not yet supported")
+                }
+            }
         }
     }
+}
+
+fn get_variables(ctx: &mut vars::Context, args: &mut Vec<Value>) -> Result<Vec<Variable>> {
+    let mut out = Vec::new();
+    for arg in args {
+        out.push(arg.get(ctx)?);
+    }
+    Ok(out)
 }
 
 impl ExecExpression for Expression {
@@ -167,7 +183,7 @@ impl ExecExpression for BreakExpression {
     fn exec(self: &mut BreakExpression, ctx: &mut vars::Context) -> Result<Option<Command>> {
         if ctx.break_num > 0 { ctx.break_num -= 1; return Ok(None) }
         let val = self.num.get(ctx)?.to_string();
-        let num: u16 = if val.len() > 0 { val.parse()? } else { 1 };
+        let num: u16 = if !val.is_empty() { val.parse()? } else { 1 };
         ctx.break_num = if num == 0 { 1 } else { num };
         Ok(None)
     }
@@ -247,7 +263,7 @@ impl ExecExpression for LetExpression {
 impl ExecExpression for Vec<CommandValue> {
     fn exec(self: &mut Vec<CommandValue>, ctx: &mut vars::Context) -> Result<Option<Command>> {
         if ctx.break_num > 0 { return Ok(None) }
-        if self.len() == 0 { bail!("Command with 0 length"); }
+        if self.is_empty() { bail!("Command with 0 length"); }
         let mut first = self.remove(0);
         let command_name = first.get(ctx)?.to_string();
         let mut cmd = Command::new(command_name);
@@ -286,8 +302,7 @@ impl ExecExpression for FileTargetExpression {
                 todo!("Redirect without target file");
             }
         };
-        let command;
-        match src {
+        let command = match src {
             Some(mut cmd) => {
                 cmd.stdout(Stdio::piped());
                 let file = File::create(target.to_string());
@@ -304,7 +319,7 @@ impl ExecExpression for FileTargetExpression {
                         }
                     }
                 }
-                command = cmd;
+                cmd
             },
             None => { bail!("Invalid command provided for file target"); }
         };

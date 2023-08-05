@@ -1,4 +1,6 @@
 mod parser;
+mod env;
+mod nativeFunctions;
 
 use std::io::{self, BufRead, Stdout, Write};
 use std::cmp;
@@ -13,6 +15,8 @@ use termion::event::*;
 use std::fs::File;
 use std::io::BufReader;
 use anyhow::Result;
+use crate::nativeFunctions::get_native_functions;
+use crate::parser::vars::Variable;
 
 struct Term {
     input: String,
@@ -21,10 +25,10 @@ struct Term {
 
 impl Term {
     fn new() -> Term {
-        return Term {
+        Term {
             input: String::new(),
             idx: 0,
-        };
+        }
     }
 
     fn print(self: &Self, stdout: &mut RawTerminal<Stdout>) {
@@ -61,10 +65,10 @@ struct Shell {
 
 impl Shell {
     fn new() -> Shell {
-        return Shell {
+        Shell {
             term: Term::new(),
             ctx: parser::vars::Context::new()
-        };
+        }
     }
 
     fn collect(&mut self) {
@@ -88,7 +92,7 @@ impl Shell {
                     }
                 }
                 Key::Backspace => {
-                    if self.term.input.len() > 0 && self.term.idx > 0 {
+                    if !self.term.input.is_empty() && self.term.idx > 0 {
                         if self.term.idx == self.term.input.len() - 1 {
                             self.term.input.pop();
                         } else {
@@ -138,6 +142,7 @@ impl Shell {
 
     fn start() {
         let mut shell = Shell::new();
+        shell.ctx.native_func = get_native_functions();
         loop {
             print!("$: ");
             io::stdout().flush().unwrap();
@@ -146,11 +151,9 @@ impl Shell {
                 break;
             }
             shell.term.input += "\n";
+            shell.ctx.exports = env::os_env_hashmap().into_iter().map(|(k, v)| (k, Variable::String(v))).collect();
             let res = parser::exec(&mut shell.term.input.as_bytes(), &mut shell.ctx);
-            match res {
-                Err(err) => eprintln!("rush: {}", err),
-                Ok(_) => {}
-            }
+            if let Err(err) = res { eprintln!("rush: {}", err) }
         }
     }
 }
@@ -202,15 +205,8 @@ mod test {
     use std::fs::File;
     use std::io::BufReader;
     use std::path::Path;
-    use crate::parser;
+    use crate::{load_and_run, parser};
     use anyhow::Result;
-
-    fn load_and_run<P: AsRef<Path>>(path: P) -> Result<()> {
-        let mut ctx = parser::vars::Context::new();
-        let src = File::open(path).unwrap();
-        parser::exec(&mut BufReader::new(src), &mut ctx)
-    }
-
     #[test]
     fn simple() -> Result<()> {
         load_and_run("test/simple.rush")
