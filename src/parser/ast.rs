@@ -58,6 +58,7 @@ pub enum Value {
     Literal(String),
     Variable(String),
     ArrayVariable(String),
+    ArrayDefinition(Vec<Value>),
     ArrayFunction(DefinedFunction),
     StringFunction(DefinedFunction),
     Expressions(Vec<Expression>),
@@ -137,7 +138,7 @@ impl Tree {
         let mut token = self.get_current_token();
         loop {
             if matches!(token, Tokens::Space) {
-                if buf.len() > 0 {
+                if !buf.is_empty() {
                     values.push(CommandValue::Value(Value::Values(buf)));
                     buf = Vec::new();
                 }
@@ -149,12 +150,12 @@ impl Tree {
             let val = match &token {
                 Tokens::Literal(str) => Value::Literal(str.clone()),
                 Tokens::SubStart => {
-                    let val = self.get_value(end)?;
+                    let val = self.get_value(end, false)?;
                     token = self.get_current_token();
                     val
                 },
                 Tokens::StringVariable(str, _) => {
-                    if str.len() == 0 { bail!("Expected variable name"); }
+                    if str.is_empty() { bail!("Expected variable name"); }
                     Value::Variable(str.clone())
                 },
                 Tokens::ArrayVariable(str, _) => Value::ArrayVariable(str.clone()),
@@ -185,7 +186,7 @@ impl Tree {
             _ => {}
         }
         // self.next();
-        if buf.len() > 0 {
+        if !buf.is_empty() {
             values.push(CommandValue::Value(Value::Values(buf)));
         }
         Ok(Expression::Command(values))
@@ -201,18 +202,15 @@ impl Tree {
                 _ => len += 1
             }
         }
-        let key = Box::new(self.get_value(self.i + len)?);
+        let key = Box::new(self.get_value(self.i + len, false)?);
         self.inc(); // ????
         self.inc();
-        let value = Box::new(self.get_value(end)?);
+        let value = Box::new(self.get_value(end, false)?);
         Ok(Expression::LetExpression(LetExpression { key, vartype: None, value }))
     }
 
     fn parse_read(&mut self, target: Option<Expression>, _end: usize) -> Result<Expression> {
-        let target = match target {
-            Some(source) => Some(Box::new(source)),
-            None => None
-        };
+        let target = target.map(Box::new);
         self.i += 1;
         let mut val_end = self.i;
         let mut found_first = false;
@@ -227,16 +225,13 @@ impl Tree {
             }
         }
         val_end -= 1;
-        let source = Box::new(self.get_value(val_end)?);
+        let source = Box::new(self.get_value(val_end, false)?);
         self.inc();
         Ok(Expression::FileSourceExpression(FileSourceExpression { source, target }))
     }
 
     fn parse_write(&mut self, source: Option<Expression>, _end: usize) -> Result<Expression> {
-        let source = match source {
-            Some(source) => Some(Box::new(source)),
-            None => None
-        };
+        let source = source.map(Box::new);
         self.i += 1;
         let mut val_end = self.i;
         let mut found_first = false;
@@ -251,7 +246,7 @@ impl Tree {
             }
         }
         val_end -= 1;
-        let target = Box::new(self.get_value(val_end)?);
+        let target = Box::new(self.get_value(val_end, false)?);
         self.inc();
         Ok(Expression::FileTargetExpression(FileTargetExpression { source, target }))
     }
@@ -353,14 +348,27 @@ impl Tree {
         Ok(expressions)
     }
 
-    fn get_value(&mut self, end: usize) -> Result<Value> {
+    fn parse_array_definition(&mut self, end: usize) -> Result<Vec<Value>> {
+        let mut values: Vec<Value> = Vec::new();
+        if matches!(self.get_current_token(), Tokens::Space) { self.inc(); }
+        loop {
+            if self.i >= end - 1 { break; }
+            let val = self.get_value(end, true)?;
+            values.push(val);
+            if matches!(self.get_current_token(), Tokens::Space) { self.inc(); }
+        }
+        Ok(values)
+    }
+
+    fn get_value(&mut self, end: usize, stop_on_space: bool) -> Result<Value> {
         let mut token = self.get_current_token();
         let mut values: Vec<Value> = Vec::new();
         let mut buf: Vec<Value> = Vec::new();
         loop {
             match token {
                 Tokens::Space => {
-                    if buf.len() == 0 { token = self.inc().get_current_token(); continue; }
+                    if stop_on_space { break; }
+                    if buf.is_empty() { token = self.inc().get_current_token(); continue; }
                     values.push(Value::Values(buf));
                     buf = Vec::new();
                     if self.i >= end - 1 { break }
@@ -376,6 +384,31 @@ impl Tree {
                 Tokens::ArrayFunction(_) => bail!("Unexpected array function"),
                 Tokens::StringFunction(_) => bail!("Unexpected string function"),
                 Tokens::ParenthesisStart => bail!("Parenthesis not yet implemented"),
+                Tokens::ArrayStart => {
+                    let mut len = 0;
+                    let mut lvl = 1;
+                    self.inc();
+                    for token in &self.tokens[self.i..] {
+                        match token.token {
+                            Tokens::ArrayStart => lvl += 1,
+                            Tokens::ArrayEnd => lvl -= 1,
+                            _ => {}
+                        }
+                        if lvl == 0 {
+                            break;
+                        }
+
+                        if len + self.i == end { break }
+                        len += 1;
+                    }
+                    if lvl != 0 {
+                        bail!("Parenthesis do not match");
+                    }
+                    let val = Value::ArrayDefinition(self.parse_array_definition(self.i + len)?);
+                    values.push(val);
+                    self.inc();
+                },
+                Tokens::ArrayEnd => bail!("Unexpected token ARRAY END (])"),
                 Tokens::SubStart => {
                     let mut len = 0;
                     let mut lvl = 1;
@@ -411,14 +444,14 @@ impl Tree {
                 Tokens::Let => buf.push(Value::Literal(token.to_str())),
                 Tokens::While => buf.push(Value::Literal(token.to_str())),
                 Tokens::StringVariable(str, _) => {
-                    if buf.len() != 0 {
+                    if !buf.is_empty() {
                         values.push(Value::Values(buf));
                         buf = Vec::new();
                     }
                     values.push(Value::Variable(str.clone()));
                 },
                 Tokens::ArrayVariable(str, _) => {
-                    if buf.len() != 0 {
+                    if !buf.is_empty() {
                         values.push(Value::Values(buf));
                         buf = Vec::new();
                     }
@@ -432,8 +465,11 @@ impl Tree {
             if self.i >= end - 1 { break }
             token = self.inc().get_current_token();
         }
-        if buf.len() > 0 {
+        if !buf.is_empty() {
             values.push(Value::Values(buf));
+        }
+        if values.len() == 1 {
+            return Ok(values.into_iter().next().unwrap());
         }
         Ok(Value::Values(values))
     }
@@ -487,6 +523,8 @@ impl Tree {
                     self.inc();
                 },
                 Tokens::ParenthesisEnd => bail!("Unexpected token PARENTHESIS END ())"),
+                Tokens::ArrayStart => bail!("Arrays not yet implemented"),
+                Tokens::ArrayEnd => bail!("Unexpected token ARRAY END (])"),
                 Tokens::ArrayFunction(_) => bail!("Unexpected array function"),
                 Tokens::StringFunction(_) => bail!("Unexpected string function"),
                 Tokens::SubStart => match expr {
@@ -528,7 +566,7 @@ impl Tree {
                 Tokens::Break => match expr {
                     None => {
                         self.inc();
-                        expr = Some(Expression::BreakExpression(BreakExpression { num: Box::new(self.get_value(end)?)}));
+                        expr = Some(Expression::BreakExpression(BreakExpression { num: Box::new(self.get_value(end, false)?)}));
                     },
                     Some(_) => bail!("Unexpected break")
                 }
@@ -552,6 +590,7 @@ impl Tree {
 }
 
 pub fn build_tree(tokens: Vec<Token>) -> Result<Vec<Expression>> {
+    dbg!(&tokens);
     let mut expressions: Vec<Expression> = Vec::new();
     let mut tree = Tree { tokens, i: 0 };
     loop {

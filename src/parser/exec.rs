@@ -131,7 +131,7 @@ impl GetValue for Value {
                 ctx.pop_scope();
                 Ok(Variable::String(out))
             },
-            Value::Values(vec) => {
+            Value::Values(vec) | Value::ArrayDefinition(vec) => {
                 let mut out = Vec::new();
                 for val in vec {
                     out.push(val.get(ctx)?);

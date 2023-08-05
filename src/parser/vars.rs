@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 use anyhow::{bail, Result};
 use crate::parser::ast::FunctionDefinitionExpression;
 
@@ -17,9 +18,9 @@ pub enum Variable {
     Array(Vec<Variable>)
 }
 
-impl Variable {
-    pub fn to_string(self: &Self) -> String {
-        match self {
+impl Display for Variable {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", match self {
             Variable::String(var) => {
                 var.clone()
             },
@@ -36,23 +37,98 @@ impl Variable {
             },
             Variable::Array(vars) => {
                 let len = vars.len();
-                if len == 1 { return vars.get(0).unwrap().to_string(); }
+                if len == 1 {
+                    return match vars.get(0) {
+                        Some(var) => write!(f, "{}", var),
+                        None => write!(f, "[]")
+                    }
+                }
                 let mut str = String::new();
-                let mut i = 0;
-                for var in vars {
+                for (i, var) in vars.iter().enumerate() {
                     str += &*var.clone().to_string();
                     if i < len - 1 {
                         str += " ";
                     }
-                    i += 1;
                 }
                 str
             }
-        }
+        })
     }
+}
 
-    pub fn index(self: &Self, index: &Variable) -> Result<&Variable> {
+impl Variable {
+    pub fn index(&self, index: &Variable) -> Result<&Variable> {
         match self {
+            Variable::HMap(map) => {
+                match index {
+                    Variable::String(key) => {
+                        match map.get(key) {
+                            Some(val) => Ok(val),
+                            None => bail!("Key not found")
+                        }
+                    }
+                    _ => bail!("Cannot index with non-string")
+                }
+            },
+            Variable::Array(arr) => {
+                match index {
+                    Variable::I32(idx) => {
+                        match arr.get(*idx as usize) {
+                            Some(val) => Ok(val),
+                            None => bail!("Index out of bounds")
+                        }
+                    }
+                    Variable::I64(idx) => {
+                        match arr.get(*idx as usize) {
+                            Some(val) => Ok(val),
+                            None => bail!("Index out of bounds")
+                        }
+                    }
+                    Variable::I128(idx) => {
+                        match arr.get(*idx as usize) {
+                            Some(val) => Ok(val),
+                            None => bail!("Index out of bounds")
+                        }
+                    }
+                    Variable::F32(idx) => {
+                        match arr.get(*idx as usize) {
+                            Some(val) => Ok(val),
+                            None => bail!("Index out of bounds")
+                        }
+                    }
+                    Variable::F64(idx) => {
+                        match arr.get(*idx as usize) {
+                            Some(val) => Ok(val),
+                            None => bail!("Index out of bounds")
+                        }
+                    }
+                    Variable::U32(idx) => {
+                        match arr.get(*idx as usize) {
+                            Some(val) => Ok(val),
+                            None => bail!("Index out of bounds")
+                        }
+                    }
+                    Variable::U64(idx) => {
+                        match arr.get(*idx as usize) {
+                            Some(val) => Ok(val),
+                            None => bail!("Index out of bounds")
+                        }
+                    }
+                    Variable::U128(idx) => {
+                        match arr.get(*idx as usize) {
+                            Some(val) => Ok(val),
+                            None => bail!("Index out of bounds")
+                        }
+                    }
+                    Variable::String(idx) => {
+                        match arr.get(idx.parse::<usize>()?) {
+                            Some(val) => Ok(val),
+                            None => bail!("Index out of bounds")
+                        }
+                    }
+                    _ => bail!("Cannot index with non-integer")
+                }
+            },
             _ => bail!("Cannot index unsupported types")
         }
     }
@@ -100,11 +176,11 @@ impl Context {
     }
 
     pub fn get_var(self: &mut Self, var: &str) -> Option<&mut Variable> {
-        for mut scope in self.scopes.iter_mut().rev() {
-            let mut vars = &mut scope.vars;
+        for scope in self.scopes.iter_mut().rev() {
+            let vars = &mut scope.vars;
             let val = vars.get_mut(var);
             match val {
-                None => {},
+                None => {}
                 Some(val) => {
                     return Some(val);
                 }
@@ -114,16 +190,16 @@ impl Context {
     }
 
     pub fn set_var(&mut self, key: String, val: Variable) {
-        let mut vars = &mut self.scopes.last_mut().unwrap().vars;
+        let vars = &mut self.scopes.last_mut().unwrap().vars;
         vars.insert(key, val);
     }
 
     pub fn get_func(self: &mut Self, key: &str) -> Option<&mut FunctionDefinitionExpression> {
-        for mut scope in self.scopes.iter_mut().rev() {
-            let mut funcs = &mut scope.func;
+        for scope in self.scopes.iter_mut().rev() {
+            let funcs = &mut scope.func;
             let val = funcs.get_mut(key);
             match val {
-                None => {},
+                None => {}
                 Some(val) => {
                     return Some(val);
                 }

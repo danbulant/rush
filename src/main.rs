@@ -33,9 +33,10 @@ impl Term {
     fn format(self: &Self, stdout: &mut RawTerminal<Stdout>) -> String {
         let (_, y) = stdout.cursor_pos().unwrap();
         format!(
-            "{}{}{}{}{}",
+            "{}{}{}{}{}{}",
             termion::clear::CurrentLine,
             termion::cursor::Goto(1, y),
+            "$: ",
             &self.input,
             termion::cursor::Left((self.input.len() - self.idx).try_into().unwrap()),
             termion::cursor::Right(if self.input.len() > 0 { 1 } else { 0 } )
@@ -141,6 +142,9 @@ impl Shell {
             print!("$: ");
             io::stdout().flush().unwrap();
             shell.collect();
+            if shell.term.input == "exit" {
+                break;
+            }
             shell.term.input += "\n";
             let res = parser::exec(&mut shell.term.input.as_bytes(), &mut shell.ctx);
             match res {

@@ -19,6 +19,8 @@ pub enum Tokens {
     StringFunction(String),
     ParenthesisStart,
     ParenthesisEnd,
+    ArrayStart,
+    ArrayEnd,
     CommandEnd(char),
     If,
     Else,
@@ -49,10 +51,12 @@ impl Tokens {
             "$(" => Tokens::SubStart,
             "(" => Tokens::ParenthesisStart,
             ")" => Tokens::ParenthesisEnd,
+            "[" => Tokens::ArrayStart,
+            "]" => Tokens::ArrayEnd,
             ">" => Tokens::FileWrite,
             "<" => Tokens::FileRead,
             "|" => Tokens::RedirectInto,
-            "\r\n" | "\n" | ";" => Tokens::CommandEnd(str.chars().nth(0).unwrap()),
+            "\r\n" | "\n" | ";" => Tokens::CommandEnd(str.chars().next().unwrap()),
             "&&" => Tokens::And,
             "||" => Tokens::Or,
             "=" => Tokens::ExportSet,
@@ -81,6 +85,8 @@ impl Tokens {
             Tokens::SubStart => "$(".to_string(),
             Tokens::ParenthesisStart => "(".to_string(),
             Tokens::ParenthesisEnd => ")".to_string(),
+            Tokens::ArrayStart => "[".to_string(),
+            Tokens::ArrayEnd => "]".to_string(),
             Tokens::RedirectInto => "|".to_string(),
             Tokens::FileRead => "<".to_string(),
             Tokens::FileWrite => ">".to_string(),
@@ -93,7 +99,7 @@ impl Tokens {
 }
 
 
-fn read_var_ahead(i: usize, text: &String) -> (usize, Token) {
+fn read_var_ahead(i: usize, text: &str) -> Result<(usize, Token)> {
     let mut x = i;
     let mut buf = String::new();
     let parens_mode = text.chars().nth(x + 1).unwrap() == '{';
@@ -103,7 +109,7 @@ fn read_var_ahead(i: usize, text: &String) -> (usize, Token) {
         let letter: char = text.chars().nth(x).unwrap();
         match letter {
             'a'..='z' | 'A'..='Z' | '0'..='9' | ':' | '_' => {
-                buf.push(letter.clone());
+                buf.push(letter);
             }
             '}' => {
                 if parens_mode {
@@ -112,19 +118,19 @@ fn read_var_ahead(i: usize, text: &String) -> (usize, Token) {
                 break;
             }
             '?' => {
-                buf.push(letter.clone());
+                buf.push(letter);
                 x += 1;
                 break;
             }
-            l => { if !parens_mode { break } else { panic!("Invalid variable name (starting with '{:?}{:?}')", buf, l) } }
+            l => { if !parens_mode { break } else { bail!("Invalid variable name (starting with '{}{}')", buf, l) } }
         }
     }
     let token = match text.chars().nth(i).unwrap() {
         '$' => Token { token: Tokens::StringVariable(buf, parens_mode), start: i, end: i + x },
         '@' => Token { token: Tokens::ArrayVariable(buf, parens_mode), start:i , end: i+x },
-        a => panic!("Invalid value {}", a)
+        a => bail!("Invalid value {}", a)
     };
-    (x - i - 1, token)
+    Ok((x - i - 1, token))
 }
 
 pub fn tokenize(reader: &mut dyn std::io::BufRead) -> Result<Vec<Token>> {
@@ -133,12 +139,12 @@ pub fn tokenize(reader: &mut dyn std::io::BufRead) -> Result<Vec<Token>> {
     let mut escape_active = false;
     let mut text = String::new();
     reader.read_to_string(&mut text)?;
-    let mut text_length = text.len();
+    let text_length = text.len();
 
     let mut tokens: Vec<Token> = Vec::new();
 
     fn save_buf(buf: &mut String, tokens: &mut Vec<Token>, i: usize) {
-        if buf.len() > 0 { tokens.push(Token { token: Tokens::detect(std::mem::take(buf)), end: i, start: i - buf.len() }) }
+        if !buf.is_empty() { tokens.push(Token { token: Tokens::detect(std::mem::take(buf)), end: i, start: i - buf.len() }) }
     }
 
     let mut buf = String::new();
@@ -153,24 +159,20 @@ pub fn tokenize(reader: &mut dyn std::io::BufRead) -> Result<Vec<Token>> {
         match letter {
             '"' => if !escape_active && !quote_active { double_quote_active = !double_quote_active; buf_add = false },
             '\'' => if !escape_active && !double_quote_active { quote_active = !quote_active; buf_add = false },
-            '$' => if !escape_active && !quote_active {
+            '$' | '@' => if !escape_active && !quote_active {
                 save_buf(&mut buf, &mut tokens, i);
-                if text_length > i && text.chars().nth(i + 1).unwrap() == '(' {
+                if *letter == '$' && text_length > i && text.chars().nth(i + 1).unwrap() == '(' {
                     tokens.push(Token { token: Tokens::SubStart, start: i, end: i+1 });
                     skipper = 1;
                     buf_add = false;
                 } else {
-                    let (skippers, mut token) = read_var_ahead(i, &text);
+                    let (skippers, mut token) = read_var_ahead(i, &text)?;
                     match token.token {
-                        Tokens::StringVariable(ref str, bool) => if !bool && !double_quote_active {
-                            if text.len() > i + skippers && text.chars().nth(i + skippers).unwrap() == '(' {
-                                token = Token { token: Tokens::StringFunction(str.clone()), end: i + skippers, start: i };
-                            }
+                        Tokens::StringVariable(ref str, bool) => if !bool && !double_quote_active && text.len() > i + skippers && text.chars().nth(i + skippers).unwrap() == '(' {
+                            token = Token { token: Tokens::StringFunction(str.clone()), end: i + skippers, start: i };
                         },
-                        Tokens::ArrayVariable(ref str, bool) => if !bool && !double_quote_active {
-                            if text.len() > i + skippers && text.chars().nth(i + skippers).unwrap() == '(' {
-                                token = Token { token: Tokens::ArrayFunction(str.clone()), end: i+skippers, start: i };
-                            }
+                        Tokens::ArrayVariable(ref str, bool) => if !bool && !double_quote_active && text.len() > i + skippers && text.chars().nth(i + skippers).unwrap() == '(' {
+                            token = Token { token: Tokens::ArrayFunction(str.clone()), end: i+skippers, start: i };
                         }
                         _ => bail!("Cannot happen")
                     }
@@ -181,7 +183,7 @@ pub fn tokenize(reader: &mut dyn std::io::BufRead) -> Result<Vec<Token>> {
             },
             ';' | '\r' | '\n' => if !escape_active && !quote_active && !double_quote_active {
                 save_buf(&mut buf, &mut tokens, i);
-                tokens.push(Token { token: Tokens::CommandEnd(letter.clone()), start: i, end: i });
+                tokens.push(Token { token: Tokens::CommandEnd(*letter), start: i, end: i });
                 let mut x = 0;
                 while x < text.len() - 1 && matches!(text.chars().nth(x).unwrap(), '\n' | '\r' | ';' | ' ') {
                     x += 1;
@@ -231,6 +233,16 @@ pub fn tokenize(reader: &mut dyn std::io::BufRead) -> Result<Vec<Token>> {
                 tokens.push(Token { token: Tokens::ParenthesisEnd, start: i, end: i });
                 buf_add = false;
             },
+            '[' => if !quote_active && !double_quote_active && !escape_active {
+                save_buf(&mut buf, &mut tokens, i);
+                tokens.push(Token { token: Tokens::ArrayStart, start: i, end: i });
+                buf_add = false;
+            },
+            ']' => if !quote_active && !double_quote_active && !escape_active {
+                save_buf(&mut buf, &mut tokens, i);
+                tokens.push(Token { token: Tokens::ArrayEnd, start: i, end: i });
+                buf_add = false;
+            },
             '\\' => if !escape_active {
                 escape_active = true;
                 buf_add = false;
@@ -253,7 +265,7 @@ pub fn tokenize(reader: &mut dyn std::io::BufRead) -> Result<Vec<Token>> {
             }
             _ => {}
         }
-        if letter.clone() != '\\' { escape_active = false; }
+        if *letter != '\\' { escape_active = false; }
         if buf_add {
             buf.push(*letter);
         }
