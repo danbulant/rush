@@ -608,7 +608,7 @@ impl Tree {
                     Some(_) => bail!("Commands must be ended properly"),
                     None => {expr = Some(Expression::IfExpression(self.parse_if(end)?)); },
                 }
-                Tokens::Let => return Ok(self.parse_let(end)?),
+                Tokens::Let => return self.parse_let(end),
                 Tokens::While => return Ok(Expression::WhileExpression(self.parse_while(end)?)),
                 Tokens::StringVariable(_, _) => if matches!(expr, Some(_)) {
                     bail!("Unexpected variable. After file redirect, you need to use a semicolon or newline.");

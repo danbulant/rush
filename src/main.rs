@@ -7,7 +7,7 @@ use std::cmp;
 use std::convert::TryInto;
 use std::path::Path;
 use std::process;
-use clap::{Arg, Command, arg};
+use clap::{Command, arg};
 use termion::raw::{IntoRawMode, RawTerminal};
 use termion::input::TermRead;
 use termion::cursor::{DetectCursorPos};
@@ -182,30 +182,21 @@ fn main() {
         )
         .get_matches();
 
-    match matches.value_of("command") {
-        Some(command) => {
-            let mut ctx = parser::vars::Context::new();
-            parser::exec(&mut command.as_bytes(), &mut ctx).unwrap();
-            return;
-        },
-        None => {}
+    if let Some(command) = matches.value_of("command") {
+        let mut ctx = parser::vars::Context::new();
+        parser::exec(&mut command.as_bytes(), &mut ctx).unwrap();
+        return;
     };
-    match matches.value_of("file") {
-        Some(file) => {
-            load_and_run(file).unwrap();
-            return;
-        },
-        None => {}
+    if let Some(file) = matches.value_of("file") {
+        load_and_run(file).unwrap();
+        return;
     };
     Shell::start();
 }
 
 #[cfg(test)]
 mod test {
-    use std::fs::File;
-    use std::io::BufReader;
-    use std::path::Path;
-    use crate::{load_and_run, parser};
+    use crate::{load_and_run};
     use anyhow::Result;
     #[test]
     fn simple() -> Result<()> {

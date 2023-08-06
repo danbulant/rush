@@ -1,21 +1,19 @@
 use std::fs::File;
-use std::process::{Child, Command, Stdio};
-use std::io;
+use std::process::{Command};
 use crate::parser::ast::{AndExpression, BreakExpression, CommandValue, Expression, FileSourceExpression, FileTargetExpression, ForExpression, IfExpression, LetExpression, OrExpression, RedirectTargetExpression, Value, WhileExpression};
-use crate::parser::vars;
 use crate::parser::vars::{AnyFunction, Context, Variable};
 use anyhow::{Result, bail, Context as AnyhowContext};
 
 trait ExecExpression {
-    fn exec(&mut self, ctx: &mut vars::Context) -> Result<Option<Command>>;
+    fn exec(&mut self, ctx: &mut Context) -> Result<Option<Command>>;
 }
 
 trait GetValue {
-    fn get(&mut self, ctx: &mut vars::Context) -> Result<Variable>;
+    fn get(&mut self, ctx: &mut Context) -> Result<Variable>;
 }
 
 impl GetValue for CommandValue {
-    fn get(self: &mut CommandValue, ctx: &mut vars::Context) -> Result<Variable> {
+    fn get(self: &mut CommandValue, ctx: &mut Context) -> Result<Variable> {
         match self {
             CommandValue::Value(val) => val.get(ctx),
             CommandValue::Var(_, _) => bail!("Broken executor")
@@ -24,7 +22,7 @@ impl GetValue for CommandValue {
 }
 
 impl GetValue for Value {
-    fn get(self: &mut Value, ctx: &mut vars::Context) -> Result<Variable> {
+    fn get(self: &mut Value, ctx: &mut Context) -> Result<Variable> {
         match self {
             Value::Literal(str) => {
                 Ok(Variable::String(str.clone()))
@@ -67,7 +65,7 @@ impl GetValue for Value {
     }
 }
 
-fn get_variables(ctx: &mut vars::Context, args: &mut Vec<Value>) -> Result<Vec<Variable>> {
+fn get_variables(ctx: &mut Context, args: &mut Vec<Value>) -> Result<Vec<Variable>> {
     let mut out = Vec::new();
     for arg in args {
         out.push(arg.get(ctx)?);
@@ -76,7 +74,7 @@ fn get_variables(ctx: &mut vars::Context, args: &mut Vec<Value>) -> Result<Vec<V
 }
 
 impl ExecExpression for Expression {
-    fn exec(self: &mut Expression, ctx: &mut vars::Context) -> Result<Option<Command>> {
+    fn exec(self: &mut Expression, ctx: &mut Context) -> Result<Option<Command>> {
         match self {
             Expression::LetExpression(expr) => expr.exec(ctx),
             Expression::Command(expr) => expr.exec(ctx),
@@ -122,7 +120,7 @@ impl ExecExpression for Option<Command> {
 }
 
 impl ExecExpression for BreakExpression {
-    fn exec(self: &mut BreakExpression, ctx: &mut vars::Context) -> Result<Option<Command>> {
+    fn exec(self: &mut BreakExpression, ctx: &mut Context) -> Result<Option<Command>> {
         if ctx.break_num > 0 { ctx.break_num -= 1; return Ok(None) }
         let val = self.num.get(ctx)?.to_string();
         let num: u16 = if !val.is_empty() { val.parse()? } else { 1 };
@@ -132,22 +130,22 @@ impl ExecExpression for BreakExpression {
 }
 
 impl ExecExpression for WhileExpression {
-    fn exec(self: &mut WhileExpression, ctx: &mut vars::Context) -> Result<Option<Command>> {
+    fn exec(self: &mut WhileExpression, ctx: &mut Context) -> Result<Option<Command>> {
         if ctx.break_num > 0 { ctx.break_num -= 1; return Ok(None) }
         let mut condition = match self.condition.exec(ctx)? {
             None => bail!("Invalid while expression"),
             Some(cmd) => cmd
         };
         ctx.add_scope();
-        let mut res = None;
+        let mut res;
         loop {
-            let condres = condition.exec(ctx)?;
+            let condition_res = condition.exec(ctx)?;
             let code = ctx.get_last_exit_code().unwrap_or(1);
 
             if code == 0 {
                 res = self.contents.exec(ctx)?
             } else {
-                res = condres;
+                res = condition_res;
                 break;
             }
             if ctx.break_num > 0 {
@@ -226,20 +224,20 @@ impl ExecExpression for ForExpression {
 }
 
 impl ExecExpression for IfExpression {
-    fn exec(self: &mut IfExpression, ctx: &mut vars::Context) -> Result<Option<Command>> {
+    fn exec(self: &mut IfExpression, ctx: &mut Context) -> Result<Option<Command>> {
         if ctx.break_num > 0 { return Ok(None) }
         let mut condition = match self.condition.exec(ctx)? {
             None => bail!("Invalid IF expression"),
             Some(cmd) => cmd
         };
         ctx.add_scope();
-        let mut res = condition.exec(ctx)?;
+        condition.exec(ctx)?;
         let code = ctx.get_last_exit_code().unwrap_or(1);
-        if code == 0 {
-            res = self.contents.exec(ctx)?;
+        let res= if code == 0 {
+            self.contents.exec(ctx)?
         } else {
-            res = self.else_contents.exec(ctx)?;
-        }
+            self.else_contents.exec(ctx)?
+        };
         ctx.pop_scope();
 
         Ok(res)
@@ -247,7 +245,7 @@ impl ExecExpression for IfExpression {
 }
 
 impl ExecExpression for LetExpression {
-    fn exec(self: &mut LetExpression, ctx: &mut vars::Context) -> Result<Option<Command>> {
+    fn exec(self: &mut LetExpression, ctx: &mut Context) -> Result<Option<Command>> {
         if ctx.break_num > 0 { return Ok(None) }
         let key = self.key.get(ctx)?;
         let val = self.value.get(ctx)?;
@@ -257,7 +255,7 @@ impl ExecExpression for LetExpression {
 }
 
 impl ExecExpression for Vec<CommandValue> {
-    fn exec(self: &mut Vec<CommandValue>, ctx: &mut vars::Context) -> Result<Option<Command>> {
+    fn exec(self: &mut Vec<CommandValue>, ctx: &mut Context) -> Result<Option<Command>> {
         if ctx.break_num > 0 { return Ok(None) }
         if self.is_empty() { bail!("Command with 0 length"); }
         let first = self.get_mut(0).unwrap();
@@ -271,7 +269,7 @@ impl ExecExpression for Vec<CommandValue> {
 }
 
 impl ExecExpression for RedirectTargetExpression {
-    fn exec(self: &mut RedirectTargetExpression, ctx: &mut vars::Context) -> Result<Option<Command>> {
+    fn exec(self: &mut RedirectTargetExpression, ctx: &mut Context) -> Result<Option<Command>> {
         if ctx.break_num > 0 { return Ok(None) }
         let (reader, writer) = os_pipe::pipe()?;
         let mut src = self.source.exec(ctx)?.unwrap();
@@ -287,7 +285,7 @@ impl ExecExpression for RedirectTargetExpression {
 }
 
 impl ExecExpression for FileTargetExpression {
-    fn exec(self: &mut FileTargetExpression, ctx: &mut vars::Context) -> Result<Option<Command>> {
+    fn exec(self: &mut FileTargetExpression, ctx: &mut Context) -> Result<Option<Command>> {
         if ctx.break_num > 0 { return Ok(None) }
         let src = &mut self.source;
         let target = self.target.get(ctx)?;
@@ -379,7 +377,7 @@ impl ExecExpression for AndExpression {
     }
 }
 
-pub fn exec_tree(tree: Vec<Expression>, ctx: &mut vars::Context) -> Result<()> {
+pub fn exec_tree(tree: Vec<Expression>, ctx: &mut Context) -> Result<()> {
     for mut expression in tree {
         let mut cmd = expression.exec(ctx)?;
         cmd.exec(ctx)?;
