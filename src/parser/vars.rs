@@ -1,5 +1,9 @@
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
+use std::fs::File;
+use std::io::{Read, Write};
+use std::process::Stdio;
+use std::sync::Arc;
 use anyhow::{bail, Result};
 use os_pipe::{PipeReader, PipeWriter};
 use crate::parser::ast::FunctionDefinitionExpression;
@@ -172,10 +176,59 @@ pub enum AnyFunction<'a> {
     UserDefined(&'a mut FunctionDefinitionExpression)
 }
 
+
+trait TryClone<T> {
+    fn try_clone(&self) -> Result<T>;
+}
+
+#[derive(Debug)]
+pub enum WriterOverride {
+    Pipe(PipeWriter),
+    File(File)
+}
+#[derive(Debug)]
+pub enum ReaderOverride {
+    Pipe(PipeReader),
+    File(File)
+}
+
+impl TryClone<WriterOverride> for WriterOverride {
+    fn try_clone(&self) -> Result<WriterOverride> {
+        Ok(match self {
+            WriterOverride::Pipe(pipe) => WriterOverride::Pipe(pipe.try_clone()?),
+            WriterOverride::File(file) => WriterOverride::File(file.try_clone()?)
+        })
+    }
+}
+impl TryClone<ReaderOverride> for ReaderOverride {
+    fn try_clone(&self) -> Result<ReaderOverride> {
+        Ok(match self {
+            ReaderOverride::Pipe(pipe) => ReaderOverride::Pipe(pipe.try_clone()?),
+            ReaderOverride::File(file) => ReaderOverride::File(file.try_clone()?)
+        })
+    }
+}
+impl From<WriterOverride> for Stdio {
+    fn from(value: WriterOverride) -> Self {
+        match value {
+            WriterOverride::Pipe(pipe) => pipe.into(),
+            WriterOverride::File(file) => file.into()
+        }
+    }
+}
+impl From<ReaderOverride> for Stdio {
+    fn from(value: ReaderOverride) -> Self {
+        match value {
+            ReaderOverride::Pipe(pipe) => pipe.into(),
+            ReaderOverride::File(file) => file.into()
+        }
+    }
+}
+
 pub struct Overrides {
-    pub stdin: Option<PipeReader>,
-    pub stdout: Option<PipeWriter>,
-    pub stderr: Option<PipeWriter>
+    pub stdin: Option<ReaderOverride>,
+    pub stdout: Option<WriterOverride>,
+    pub stderr: Option<WriterOverride>
 }
 
 #[derive(Debug)]
@@ -186,9 +239,9 @@ pub struct Scope {
     pub func: HashMap<String, FunctionDefinitionExpression>,
     /// list of file descriptors, to be closed when the scope is left
     pub fd: Vec<usize>,
-    pub stdin_override: Option<PipeReader>,
-    pub stdout_override: Option<PipeWriter>,
-    pub stderr_override: Option<PipeWriter>
+    pub stdin_override: Option<ReaderOverride>,
+    pub stdout_override: Option<WriterOverride>,
+    pub stderr_override: Option<WriterOverride>
 }
 
 #[derive(Debug)]
