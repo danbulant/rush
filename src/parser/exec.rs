@@ -14,89 +14,6 @@ trait GetValue {
     fn get(&mut self, ctx: &mut vars::Context) -> Result<Variable>;
 }
 
-struct ExecResult {
-    cmd: Option<Command>,
-    child: Option<Child>
-}
-
-impl ExecResult {
-    fn new(cmd: Option<Command>, child: Option<Child>) -> Self {
-        Self { cmd, child }
-    }
-    /// Spawns the result, running the command (if any). Non-command results won't be spawned (like let statements)
-    fn spawn(&mut self) -> &mut Self {
-        if !self.started() {
-            match &mut self.cmd {
-                None => {},
-                Some(cmd) => {
-                    self.child = Some(cmd.spawn().unwrap());
-                }
-            }
-        }
-        self
-    }
-    /// Checks if the result was spawned before by checking the child property. Non-command results won't ever be spawned (like let statements)
-    fn started(&self) -> bool {
-        matches!(self.child, Some(_))
-    }
-    /// A simple wrapper for redirecting current result (self) into STDIO (files or streams).
-    ///
-    /// Does spawn the current result
-    fn redirect_into<T: std::io::Write>(mut self, into: &mut T) -> &mut T {
-        match &mut self.cmd {
-            None => {},
-            Some(cmd) => {
-                cmd.stdout(Stdio::piped());
-                self.spawn();
-                let child = self.child.unwrap();
-                let mut stdout = child.stdout.unwrap();
-                io::copy(&mut stdout, into).unwrap();
-            }
-        }
-        into
-    }
-    /// A shorthand for redirecting current result into the next one
-    ///
-    /// Uses `redirect_from_result` of the next result. Spawns this result, but not the next one.
-    fn redirect_into_result(&mut self, into: &mut ExecResult) -> &mut Self {
-        into.redirect_from_result(self).unwrap();
-        self
-    }
-    /// Redirects the `from` into the current pending result
-    ///
-    /// Doesn't spawn the current result
-    fn redirect_from<T: Into<Stdio>>(&mut self, from: T) -> &mut Self {
-        match &mut self.cmd {
-            None => {},
-            Some(cmd) => {
-                cmd.stdin(from);
-            }
-        }
-        self
-    }
-    /// A shortcut for redirecting a previous result into the current one
-    ///
-    /// Spawns the previous result to obtain the output, but not the current one (self)
-    fn redirect_from_result(&mut self, into: &mut ExecResult) -> io::Result<&mut Self> {
-        if matches!(self.cmd, None) {
-            return Ok(self);
-        }
-        match &mut self.cmd {
-            None => {},
-            Some(source) => {
-                source.stdout(Stdio::piped());
-                match &mut into.cmd {
-                    None => {},
-                    Some(target) => {
-                        target.stdin(source.spawn()?.stdout.unwrap());
-                    }
-                };
-            }
-        }
-        Ok(self)
-    }
-}
-
 impl GetValue for CommandValue {
     fn get(self: &mut CommandValue, ctx: &mut vars::Context) -> Result<Variable> {
         match self {
@@ -179,6 +96,31 @@ impl ExecExpression for Expression {
     }
 }
 
+impl ExecExpression for Command {
+    fn exec(&mut self, ctx: &mut Context) -> Result<Option<Command>> {
+        let overrides = ctx.get_overrides()?;
+        if let Some(stdout) = overrides.stdout { self.stdout(stdout); }
+        if let Some(stderr) = overrides.stderr { self.stderr(stderr); }
+        if let Some(stdin) = overrides.stdin { self.stdin(stdin); }
+        let name = self.get_program().to_str().unwrap_or("unknown").to_string();
+        let out = self.spawn()
+            .with_context(|| "Failed to spawn process ".to_string() + &name)?
+            .wait()
+            .with_context(|| "Failed to wait for process")?;
+        ctx.set_var(String::from("?"), Variable::I32(out.code().unwrap_or(-1)));
+        Ok(None)
+    }
+}
+
+impl ExecExpression for Option<Command> {
+    fn exec(&mut self, ctx: &mut Context) -> Result<Option<Command>> {
+        match self {
+            None => Ok(None),
+            Some(cmd) => cmd.exec(ctx)
+        }
+    }
+}
+
 impl ExecExpression for BreakExpression {
     fn exec(self: &mut BreakExpression, ctx: &mut vars::Context) -> Result<Option<Command>> {
         if ctx.break_num > 0 { ctx.break_num -= 1; return Ok(None) }
@@ -199,26 +141,15 @@ impl ExecExpression for WhileExpression {
         ctx.add_scope();
         let mut res = None;
         loop {
-            match condition.spawn() {
-                Err(_) => {
-                    res = Some(condition);
-                    break;
-                },
-                Ok(mut child) => {
-                    if !child.wait()?.success() {
-                        res = Some(condition);
-                        break
-                    } else {
-                        match res {
-                            None => {},
-                            Some(mut cmd) => {
-                                wait_child(cmd.spawn()?, ctx)?;
-                            }
-                        }
-                        res = self.contents.exec(ctx)?
-                    }
-                }
-            };
+            let condres = condition.exec(ctx)?;
+            let code = ctx.get_last_exit_code().unwrap_or(1);
+
+            if code == 0 {
+                res = self.contents.exec(ctx)?
+            } else {
+                res = condres;
+                break;
+            }
             if ctx.break_num > 0 {
                 ctx.break_num -= 1;
                 break;
@@ -261,12 +192,7 @@ impl ExecExpression for ForExpression {
                 } else {
                     for (i, val) in arr.iter().enumerate() {
                         process(i, val.clone(), ctx, &arg_key, &arg_value)?;
-                        match res {
-                            None => {},
-                            Some(mut cmd) => {
-                                wait_child(cmd.spawn()?, ctx)?;
-                            }
-                        }
+                        res.exec(ctx)?;
                         res = self.contents.exec(ctx)?;
                         ctx.pop_scope();
                         if ctx.break_num > 0 {
@@ -282,12 +208,7 @@ impl ExecExpression for ForExpression {
                 } else {
                     for (i, char) in str.chars().enumerate() {
                         process(i, Variable::String(char.to_string()), ctx, &arg_key, &arg_value)?;
-                        match res {
-                            None => {},
-                            Some(mut cmd) => {
-                                wait_child(cmd.spawn()?, ctx)?;
-                            }
-                        }
+                        res.exec(ctx)?;
                         res = self.contents.exec(ctx)?;
                         ctx.pop_scope();
                         if ctx.break_num > 0 {
@@ -312,18 +233,13 @@ impl ExecExpression for IfExpression {
             Some(cmd) => cmd
         };
         ctx.add_scope();
-        let res = match condition.spawn() {
-            Result::Err(_) => {
-                self.else_contents.exec(ctx)?
-            },
-            Result::Ok(mut res) => {
-                if !res.wait()?.success() {
-                    self.else_contents.exec(ctx)?
-                } else {
-                    self.contents.exec(ctx)?
-                }
-            }
-        };
+        let mut res = condition.exec(ctx)?;
+        let code = ctx.get_last_exit_code().unwrap_or(1);
+        if code == 0 {
+            res = self.contents.exec(ctx)?;
+        } else {
+            res = self.else_contents.exec(ctx)?;
+        }
         ctx.pop_scope();
 
         Ok(res)
@@ -357,15 +273,14 @@ impl ExecExpression for Vec<CommandValue> {
 impl ExecExpression for RedirectTargetExpression {
     fn exec(self: &mut RedirectTargetExpression, ctx: &mut vars::Context) -> Result<Option<Command>> {
         if ctx.break_num > 0 { return Ok(None) }
+        let (reader, writer) = os_pipe::pipe()?;
         let mut src = self.source.exec(ctx)?.unwrap();
         let mut target = self.target.exec(ctx)?.unwrap();
-        src.stdout(Stdio::piped());
-        match src.spawn() {
-            Result::Err(e) => { println!("Error executing: {}", e)},
-            Result::Ok(res) => {
-                target.stdin(res.stdout.unwrap());
-            }
-        }
+        target.stdin(reader);
+        ctx.add_scope();
+        ctx.scopes.last_mut().unwrap().stdout_override = Some(writer);
+        src.exec(ctx)?;
+        ctx.pop_scope();
 
         Ok(Some(target))
     }
@@ -382,23 +297,11 @@ impl ExecExpression for FileTargetExpression {
                 todo!("Redirect without target file");
             }
         };
+
         let command = match src {
             Some(mut cmd) => {
-                cmd.stdout(Stdio::piped());
-                let file = File::create(target.to_string());
-                match file {
-                    Result::Err(e) => println!("Error: {}", e),
-                    Result::Ok(mut file) => {
-                        match cmd.spawn() {
-                            Result::Err(e) => {
-                                println!("Error executing command: {}", e);
-                            },
-                            Result::Ok(res) => {
-                                io::copy(&mut res.stdout.unwrap(), &mut file)?;
-                            }
-                        }
-                    }
-                }
+                let file = File::create(target.to_string())?;
+                cmd.stdout(file);
                 cmd
             },
             None => { bail!("Invalid command provided for file target"); }
@@ -422,10 +325,7 @@ impl ExecExpression for FileSourceExpression {
             None => { bail!("Invalid command") },
             Some(cmd) => cmd
         };
-        let source = match File::open(source) {
-            Result::Err(e) => bail!("Cannot open file: {}", e),
-            Result::Ok(file) => file
-        };
+        let source = File::open(source).with_context(|| "Couldn't open file to read")?;
         command.stdin(source);
 
         Ok(Some(command))
@@ -437,6 +337,7 @@ impl ExecExpression for Vec<Expression> {
         if ctx.break_num > 0 { return Ok(None) }
         let mut last = None;
         for expr in self {
+            last.exec(ctx)?;
             last = expr.exec(ctx)?;
             if ctx.break_num > 0 { return Ok(last) }
         }
@@ -451,20 +352,13 @@ impl ExecExpression for OrExpression {
             None => bail!("Invalid OR expression"),
             Some(cmd) => cmd
         };
-        let res = match first.spawn() {
-            Result::Err(_) => {
-                self.second.exec(ctx)?
-            },
-            Result::Ok(mut res) => {
-                if res.wait()?.success() {
-                    Some(first)
-                } else {
-                    self.second.exec(ctx)?
-                }
-            }
-        };
-
-        Ok(res)
+        first.exec(ctx)?;
+        let code = ctx.get_last_exit_code().unwrap_or(1);
+        if code == 0 {
+            Ok(Some(first))
+        } else {
+            self.second.exec(ctx)
+        }
     }
 }
 
@@ -475,43 +369,20 @@ impl ExecExpression for AndExpression {
             None => bail!("Invalid AND expression"),
             Some(cmd) => cmd
         };
-        let res = match first.spawn() {
-            Result::Err(_) => {
-                Some(first)
-            },
-            Result::Ok(mut res) => {
-                if !res.wait()?.success() {
-                    Some(first)
-                } else {
-                    self.second.exec(ctx)?
-                }
-            }
-        };
-
-        Ok(res)
+        first.exec(ctx)?;
+        let code = ctx.get_last_exit_code().unwrap_or(1);
+        if code == 0 {
+            self.second.exec(ctx)
+        } else {
+            Ok(Some(first))
+        }
     }
-}
-
-fn wait_child(mut child: Child, ctx: &mut Context) -> Result<()> {
-    let out = child.wait()?;
-    ctx.set_var(String::from("?"), Variable::I32(out.code().unwrap_or(1)));
-    Ok(())
 }
 
 pub fn exec_tree(tree: Vec<Expression>, ctx: &mut vars::Context) -> Result<()> {
     for mut expression in tree {
-        let cmd = expression.exec(ctx)?;
-        match cmd {
-            None => {},
-            Some(mut cmd) => match cmd.spawn() {
-                Result::Err(e) => {
-                    println!("Error executing: {}", e);
-                },
-                Result::Ok(mut res) => {
-                    wait_child(res, ctx)?;
-                }
-            }
-        }
+        let mut cmd = expression.exec(ctx)?;
+        cmd.exec(ctx)?;
         if ctx.break_num > 0 { bail!("Too many break statements") }
     }
     Ok(())

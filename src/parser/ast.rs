@@ -670,6 +670,6 @@ pub fn build_tree(tokens: Vec<Token>) -> Result<Vec<Expression>> {
             }
         }
     }
-    // dbg!(&expressions);
+    dbg!(&expressions);
     Ok(expressions)
 }

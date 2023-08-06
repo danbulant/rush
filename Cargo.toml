@@ -2,7 +2,7 @@
 name = "rush"
 version = "0.1.0"
 authors = ["Daniel Bulant <danbulant@gmail.com>"]
-edition = "2018"
+edition = "2021"
 description = "A simple rust shell"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -12,6 +12,7 @@ utf8-chars = "1.0.0"
 termion = "1.5.6"
 filedescriptor = "0.8.1"
 clap = "3.1.0"
+os_pipe = "1.1.4"
 
 [dependencies.anyhow]
 version = "1.0.54"

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use anyhow::{bail, Result};
+use os_pipe::{PipeReader, PipeWriter};
 use crate::parser::ast::FunctionDefinitionExpression;
 
 #[derive(Debug, Clone)]
@@ -171,6 +172,12 @@ pub enum AnyFunction<'a> {
     UserDefined(&'a mut FunctionDefinitionExpression)
 }
 
+pub struct Overrides {
+    pub stdin: Option<PipeReader>,
+    pub stdout: Option<PipeWriter>,
+    pub stderr: Option<PipeWriter>
+}
+
 #[derive(Debug)]
 pub struct Scope {
     /// list of variables
@@ -178,7 +185,10 @@ pub struct Scope {
     /// list of functions
     pub func: HashMap<String, FunctionDefinitionExpression>,
     /// list of file descriptors, to be closed when the scope is left
-    pub fd: Vec<usize>
+    pub fd: Vec<usize>,
+    pub stdin_override: Option<PipeReader>,
+    pub stdout_override: Option<PipeWriter>,
+    pub stderr_override: Option<PipeWriter>
 }
 
 #[derive(Debug)]
@@ -213,7 +223,10 @@ impl Context {
         let scope = Scope {
             func: HashMap::new(),
             vars: HashMap::new(),
-            fd: Vec::new()
+            fd: Vec::new(),
+            stdin_override: None,
+            stdout_override: None,
+            stderr_override: None
         };
         self.scopes.push(scope);
     }
@@ -239,6 +252,14 @@ impl Context {
             }
         }
         None
+    }
+
+    pub fn get_last_exit_code(&mut self) -> Option<i32> {
+        let var = self.get_var("?");
+        match var {
+            Some(Variable::I32(int)) => Some(*int),
+            _ => None,
+        }
     }
 
     pub fn set_var(&mut self, key: String, val: Variable) {
@@ -274,5 +295,46 @@ impl Context {
     pub fn set_func(&mut self, key: String, val: FunctionDefinitionExpression) {
         let func = &mut self.scopes.last_mut().unwrap().func;
         func.insert(key, val);
+    }
+
+    /// Gets relevant overrides. Should only be used before running a command, as it will clone all pipes
+    pub fn get_overrides(&self) -> Result<Overrides> {
+        let mut overrides = Overrides {
+            stdin: None,
+            stdout: None,
+            stderr: None
+        };
+
+        for scope in self.scopes.iter().rev() {
+            match overrides.stdin {
+                Some(_) => {}
+                None => {
+                    match &scope.stdin_override {
+                        Some(stdin) => overrides.stdin = Some(stdin.try_clone()?),
+                        None => {}
+                    }
+                }
+            }
+            match overrides.stderr {
+                Some(_) => {}
+                None => {
+                    match &scope.stderr_override {
+                        Some(stderr) => overrides.stderr = Some(stderr.try_clone()?),
+                        None => {}
+                    }
+                }
+            }
+            match overrides.stdout {
+                Some(_) => {}
+                None => {
+                    match &scope.stdout_override {
+                        Some(stdout) => overrides.stdout = Some(stdout.try_clone()?),
+                        None => {}
+                    }
+                }
+            }
+        }
+
+        Ok(overrides)
     }
 }
