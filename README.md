@@ -60,6 +60,9 @@ let literal = "$var"
 # or perhaps ` ?
 let formatted = f"$var"
 
+# these are builtin commands rather than syntax structures (unlike let/while etc)
+# they simply accept arguments and work with them as with any other
+# builtin commands accept structures rather than strings
 test 1 = 1
 # perhaps (( x )) could be used for math expressions?
 # basically just alias to (calc x)

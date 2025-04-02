@@ -1,0 +1,32 @@
+
+# also includes quotes and format strings
+STRING = !SPECIALS
+
+NUMBER = 1-9
+ALFA = a-zA-Z
+EOL = \n
+IDENT = ALFA (ALFA | NUMBER)*
+
+VARIABLE = $IDENT
+INDEX = VALUE ( "[" VALUE "]" ) +
+
+PRIMITIVE_VALUES = NUMBER | STRING | VARIABLE | INDEX
+
+# group and object destructors/bindings will be here
+BINDABLE = PRIMITIVE_VALUES
+
+VALUE = PRIMITIVE_VALUES | GROUP
+
+GROUP = "(" COMMAND ")"
+
+COMMAND = ( VALUE WHITESPACE ) +
+
+LET = let BINDABLE = VALUE
+
+FOR = for BINDABLE in VALUE { STATEMENTS }
+IF = if VALUE { STATEMENTS } ( else if VALUE { STATEMENTS } ) * ( else { STATEMENTS } )?
+WHILE = while VALUE { STATEMENTS } ( else { STATEMENTS } )?
+LOOP = loop { STATEMENTS }
+
+STATEMENT = COMMAND | LET | FOR | IF | WHILE | LOOP
+STATEMENTS = ( STATEMENT (; | EOL) )* STATEMENT?
