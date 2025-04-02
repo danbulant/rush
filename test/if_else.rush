@@ -1,11 +1,13 @@
-if true
-    echo condition true
-else
-    echo else
-end
+if true {
 
-if false
+} else {
+    echo condition true
+    echo else
+}
+
+if false {
     echo condition false
-else if true
+
+} else if true {
     echo condition else true
-end
+}
