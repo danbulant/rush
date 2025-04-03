@@ -1,4 +1,4 @@
-use chumsky::{error::{EmptyErr, Rich, Simple}, prelude::{any, choice, end, just, none_of, one_of, recursive}, text, IterParser, Parser};
+use chumsky::{error::{EmptyErr, Rich, Simple}, prelude::{any, choice, end, just, none_of, one_of, recursive, Recursive}, text, IterParser, Parser};
 
 
 #[derive(Debug, Clone)]
@@ -171,6 +171,37 @@ pub fn parse<'a>() -> impl Parser<'a, &'a str, Vec<Statement>, chumsky::extra::D
             string.map(Primitive::String),
         ));
 
+        let group = expr.clone()
+            .delimited_by(just('('), just(')'))
+            .map(|v| Value::Group(v));
+
+        let value = choice((
+            group,
+            primitive.clone().map(Value::Primitive),
+            // index.map(|i| Value::Primitive(Primitive::Index(i))),
+        ));
+
+        let index = value.clone()
+            .foldl(
+            value
+                .clone()
+                .padded_by(text::inline_whitespace())
+                .delimited_by(just('['), just(']'))
+                .repeated(),
+                |value, index| Value::Primitive(Primitive::Index(Index {
+                value: Box::new(value.clone()),
+                index: Box::new(index)
+            })));
+
+        let value = choice((
+            index,
+            value,
+        ));
+        // let value = recursive(|newvalue: Recursive<dyn Parser<'_, &str, Value>>| {
+
+        //     value
+        // });
+        
         let bindable = primitive.clone().map(Bindable::Primitive);
 
         let bindable_group = bindable
@@ -179,19 +210,10 @@ pub fn parse<'a>() -> impl Parser<'a, &'a str, Vec<Statement>, chumsky::extra::D
             .separated_by(just(","))
             .collect()
             .delimited_by(just('('), just(')'));
-
-        let group = expr.clone()
-            .delimited_by(just('('), just(')'))
-            .map(|v| Value::Group(v));
-
+        
         let block = expr.clone()
             .or(empty.to(vec![]))
             .delimited_by(just('{'), just('}'));
-
-        let value = choice((
-            group,
-            primitive.map(Value::Primitive),
-        ));
 
         let cmdname = value.clone()
             .and_is(choice((
