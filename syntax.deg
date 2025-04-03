@@ -17,16 +17,25 @@ BINDABLE = PRIMITIVE_VALUES
 
 VALUE = PRIMITIVE_VALUES | GROUP
 
-GROUP = "(" COMMAND ")"
+# statements are expressions, so it is possible to write `echo (if true { echo true } else { echo false })`
+GROUP = "(" STATEMENT ")"
 
-COMMAND = ( VALUE WHITESPACE ) +
+# no padding can be here, must be TEXT=VALUE
+ENV_VAR_SPECIFICATION = STRING = VALUE
 
-LET = let BINDABLE = VALUE
+COMMAND = ( ENV_VAR_SPECIFICATION WHITESPACE ) * ( VALUE WHITESPACE ) +
 
-FOR = for BINDABLE in VALUE { STATEMENTS }
+# in the future this could also support other ops like add+set
+SET = set BINDABLE = VALUE
+
+FUNCTION = fn STRING "(" ( BINDABLE , )* BINDABLE ")" { STATEMENTS }
+
+FOR = for BINDABLE in VALUE { STATEMENTS } ( else { STATEMENTS } )?
 IF = if VALUE { STATEMENTS } ( else if VALUE { STATEMENTS } ) * ( else { STATEMENTS } )?
 WHILE = while VALUE { STATEMENTS } ( else { STATEMENTS } )?
 LOOP = loop { STATEMENTS }
 
-STATEMENT = COMMAND | LET | FOR | IF | WHILE | LOOP
+BREAK = break
+
+STATEMENT = COMMAND | SET | FOR | IF | WHILE | LOOP | FUNCTION | BREAK
 STATEMENTS = ( STATEMENT (; | EOL) )* STATEMENT?

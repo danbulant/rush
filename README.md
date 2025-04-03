@@ -7,8 +7,8 @@ In case you're reading this: rush is in the works and not a priority. Features m
 ### Syntax
 
 ```sh
-let thing = var
-let thing = (echo test)
+set thing = var
+set thing = (echo test)
 echo test | cowsay
 parse file.csv
 parse file.csv | sort 2 asc
@@ -42,25 +42,29 @@ while true {
 
 loop {}
 
+fn test (arg) {
+    echo $arg
+}
+
 # do we error if array literal is used directly in exec call?
 # as that would likely be a mistake like $i [property]
 echo $i[property] $i[$dynamicproperty]
 
 # or another option - array constructor with a different syntax
 # like @[ ] [[ ]]
-let array = [var]
+set array = [var]
 # question here, do we allow multiline values? How? \ ?
 # or the more classic comma `,` for separating values and ignoring white space?
 # this is easier to write so might be preferred for very short scripting lang
-let obj = ${
+set obj = ${
     key: value
     $dynkey: $value2
 }
-let literal = "$var"
+set literal = "$var"
 # or perhaps ` ?
-let formatted = f"$var"
+set formatted = f"$var"
 
-# these are builtin commands rather than syntax structures (unlike let/while etc)
+# these are builtin commands rather than syntax structures (unlike set/while etc)
 # they simply accept arguments and work with them as with any other
 # builtin commands accept structures rather than strings
 test 1 = 1
