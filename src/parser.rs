@@ -226,7 +226,7 @@ pub fn parse<'a>() -> impl Parser<'a, &'a str, Vec<Statement>, chumsky::extra::D
         let set = just("set")
             .then_ignore(text::inline_whitespace().at_least(1))
             .ignore_then(bindable.clone())
-            .then_ignore(just('=').padded())
+            .then_ignore(just('=').padded_by(text::inline_whitespace()))
             .then(value.clone())
             .map(|(name, value): (Bindable, Value)| {
                 Set {
@@ -245,7 +245,7 @@ pub fn parse<'a>() -> impl Parser<'a, &'a str, Vec<Statement>, chumsky::extra::D
         let if_ = just("if")
             .then_ignore(text::inline_whitespace().at_least(1))
             .ignore_then(command.clone())
-            .then(block.clone().padded())
+            .then(block.clone().padded_by(text::inline_whitespace()))
             .then(else_.clone().or_not())
             .map(|((cond, body), else_body): ((Command, Vec<Statement>), _)| {
                 If {
@@ -258,7 +258,7 @@ pub fn parse<'a>() -> impl Parser<'a, &'a str, Vec<Statement>, chumsky::extra::D
         let while_ = just("while")
             .then_ignore(text::inline_whitespace().at_least(1))
             .ignore_then(command.clone())
-            .then(block.clone().padded())
+            .then(block.clone().padded_by(text::inline_whitespace()))
             .then(else_.clone().or_not())
             .map(|((cond, body), else_body): ((Command, Vec<Statement>), _)| {
                 While {
@@ -273,7 +273,7 @@ pub fn parse<'a>() -> impl Parser<'a, &'a str, Vec<Statement>, chumsky::extra::D
             .ignore_then(bindable.clone())
             .then_ignore(just("in").padded())
             .then(value.clone())
-            .then(block.clone().padded())
+            .then(block.clone().padded_by(text::inline_whitespace()))
             .then(else_.clone().or_not())
             .map(|(((name, iterable), body), else_body): (((Bindable, Value), Vec<Statement>), _)| {
                 For {
@@ -285,7 +285,7 @@ pub fn parse<'a>() -> impl Parser<'a, &'a str, Vec<Statement>, chumsky::extra::D
             });
 
         let loop_ = just("loop")
-            .ignore_then(block.clone().padded())
+            .ignore_then(block.clone().padded_by(text::inline_whitespace()))
             .map(|body: Vec<Statement>| {
                 Loop {
                     body
@@ -303,7 +303,7 @@ pub fn parse<'a>() -> impl Parser<'a, &'a str, Vec<Statement>, chumsky::extra::D
             .then_ignore(text::inline_whitespace().at_least(1))
             .ignore_then(text::ident())
             .then(bindable_group.clone())
-            .then(block.clone().padded())
+            .then(block.clone().padded_by(text::inline_whitespace()))
             .map(|((name, args), body): ((&str, Vec<Bindable>), Vec<Statement>)| {
                 Function {
                     name: name.to_string(),
