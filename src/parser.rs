@@ -160,6 +160,10 @@ pub fn parse<'a>() -> impl Parser<'a, &'a str, Vec<Statement>, chumsky::extra::D
 
     let comment = just('#').then(any().and_is(just('\n').not()).repeated());
 
+    let empty = text::inline_whitespace().ignored()
+        .or(comment.ignored())
+        .or(eol.ignored());
+
     recursive(|expr| {
         let primitive = choice((
             number.map(Primitive::Number),
@@ -181,6 +185,7 @@ pub fn parse<'a>() -> impl Parser<'a, &'a str, Vec<Statement>, chumsky::extra::D
             .map(|v| Value::Group(v));
 
         let block = expr.clone()
+            .or(empty.to(vec![]))
             .delimited_by(just('{'), just('}'));
 
         let value = choice((
