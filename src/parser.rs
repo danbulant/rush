@@ -27,6 +27,42 @@ pub struct Command {
 }
 
 #[derive(Debug, Clone)]
+pub struct CommandPipe {
+    lhs: Box<Statement>,
+    rhs: Box<Statement>
+}
+
+#[derive(Debug, Clone)]
+pub struct TargetFilePipe {
+    cmd: Option<Box<Statement>>,
+    target: Box<Value>,
+    overwrite: bool
+}
+
+#[derive(Debug, Clone)]
+pub struct SourceFilePipe {
+    cmd: Option<Box<Statement>>,
+    source: Box<Value>
+}
+
+#[derive(Debug, Clone)]
+pub struct And {
+    lhs: Box<Statement>,
+    rhs: Box<Statement>
+}
+
+#[derive(Debug, Clone)]
+pub struct Or {
+    lhs: Box<Statement>,
+    rhs: Box<Statement>
+}
+
+#[derive(Debug, Clone)]
+pub struct Not {
+    value: Box<Statement>
+}
+
+#[derive(Debug, Clone)]
 pub struct Set {
     name: Box<Bindable>,
     value: Box<Value>
@@ -78,6 +114,12 @@ pub enum Statement {
     Return(Option<Value>),
     Break,
     Continue,
+    Or(Or),
+    And(And),
+    Not(Not),
+    CommandPipe(CommandPipe),
+    TargetFilePipe(TargetFilePipe),
+    SourceFilePipe(SourceFilePipe),
 }
 
 #[derive(Debug, Clone)]
@@ -131,7 +173,7 @@ pub fn parse<'a>() -> impl Parser<'a, &'a str, Vec<Statement>, chumsky::extra::D
         .ignored()
         .boxed();
 
-    let direct_string = none_of("$()[]{}\\\"\n;")
+    let direct_string = none_of("$()[]{}\\\"\n;|&")
         .and_is(text::whitespace().at_least(1).not())
         .ignored()
         .or(escape.clone())
@@ -164,6 +206,14 @@ pub fn parse<'a>() -> impl Parser<'a, &'a str, Vec<Statement>, chumsky::extra::D
         .or(comment.ignored())
         .or(eol.ignored());
 
+    let and = just("&&");
+    let or = just("||");
+    let not = just('!');
+    let pipe = just('|');//.then(just('|').rewind().not());
+    // let pipe_target = just('>');
+    // let pipe_target_append = just(">>");
+    // let pipe_source = just('<');
+
     recursive(|expr| {
         let primitive = choice((
             number.map(Primitive::Number),
@@ -178,7 +228,6 @@ pub fn parse<'a>() -> impl Parser<'a, &'a str, Vec<Statement>, chumsky::extra::D
         let value = choice((
             group,
             primitive.clone().map(Value::Primitive),
-            // index.map(|i| Value::Primitive(Primitive::Index(i))),
         ));
 
         let index = value.clone()
@@ -197,10 +246,6 @@ pub fn parse<'a>() -> impl Parser<'a, &'a str, Vec<Statement>, chumsky::extra::D
             index,
             value,
         ));
-        // let value = recursive(|newvalue: Recursive<dyn Parser<'_, &str, Value>>| {
-
-        //     value
-        // });
         
         let bindable = primitive.clone().map(Bindable::Primitive);
 
@@ -226,6 +271,7 @@ pub fn parse<'a>() -> impl Parser<'a, &'a str, Vec<Statement>, chumsky::extra::D
                 just("continue"),
                 just("return"),
                 just("fn"),
+                just("!")
             )).then(end()).not());
 
         let args = value.clone()
@@ -345,10 +391,59 @@ pub fn parse<'a>() -> impl Parser<'a, &'a str, Vec<Statement>, chumsky::extra::D
             just("break").to(Statement::Break),
             just("continue").to(Statement::Continue),
             command.map(Statement::Command),
+        )).padded_by(text::inline_whitespace().ignored().or(comment.ignored())).boxed();
+
+        let not = not.repeated().at_least(1)
+            .foldr(
+                text::inline_whitespace()
+                .ignore_then(statement.clone()),
+                |_, rhs| Statement::Not(Not {
+                    value: Box::new(rhs)
+                })
+            ).boxed();
+
+        let or = statement.clone()
+            .foldl(
+            or
+                .padded_by(text::inline_whitespace())
+                .ignore_then(statement.clone())
+                .repeated(),
+            |lhs, rhs| Statement::Or(Or {
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs)
+            })).boxed();
+
+        let and = statement.clone()
+            .foldl(
+            and
+                .padded_by(text::inline_whitespace())
+                .ignore_then(statement.clone())
+                .repeated(),
+            |lhs, rhs| Statement::And(And {
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs)
+            })).boxed();
+
+        let pipe = statement.clone()
+            .foldl(
+            pipe
+                .padded_by(text::inline_whitespace())
+                .ignore_then(statement.clone())
+                .repeated(),
+            |lhs, rhs| Statement::CommandPipe(CommandPipe {
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs)
+            })).boxed();
+
+        let statement_pair = choice((
+            or,
+            and,
+            not,
+            pipe,
+            statement
         ));
 
-        statement
-            .padded_by(text::inline_whitespace().ignored().or(comment.ignored()))
+        statement_pair
             .separated_by(eol.repeated().at_least(1))
             .at_least(1)
             .allow_trailing()
