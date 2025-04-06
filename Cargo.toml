@@ -1,11 +1,9 @@
 [package]
 name = "rush"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Daniel Bulant <danbulant@gmail.com>"]
 edition = "2021"
 description = "A simple rust shell"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 utf8-chars = "1.0.0"
@@ -15,6 +13,7 @@ clap = "3.1.0"
 os_pipe = "1.1.4"
 chumsky = "0.10.0"
 rustyline = "15.0.0"
+gc = { version = "0.5", features = ["derive"] }
 
 [dependencies.anyhow]
 version = "1.0.54"

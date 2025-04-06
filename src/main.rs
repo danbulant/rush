@@ -1,7 +1,8 @@
 use std::io::Read;
 use chumsky::Parser;
 
-mod parser;
+pub mod parser;
+pub mod executor;
 
 fn main() {
     let mut file = std::fs::File::open("./test/parsetest.rush").expect("Unable to open file");
@@ -10,5 +11,17 @@ fn main() {
 
     dbg!(&string);
 
-    println!("{:?}", parser::parse().parse(&string));
+    let parsed = parser::parse().parse(&string);
+
+    println!("{:?}",parsed);
+
+    if parsed.has_errors() {
+        println!("Parsing failed");
+        for error in parsed.errors() {
+            println!("{:?}", error);
+        }
+        return;
+    } else {
+        println!("Parsing succeeded");
+    }
 }

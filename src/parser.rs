@@ -107,7 +107,7 @@ pub struct Loop {
 }
 
 #[derive(Debug, Clone)]
-pub struct Function {
+pub struct FunctionDefinition {
     name: String,
     args: Vec<Bindable>,
     body: Vec<Statement>
@@ -121,7 +121,7 @@ pub enum Statement {
     While(While),
     If(If),
     Loop(Loop),
-    Function(Function),
+    Function(FunctionDefinition),
     Return(Option<Value>),
     Break,
     Continue,
@@ -140,7 +140,6 @@ pub enum Value {
 }
 
 pub fn parse<'a>() -> impl Parser<'a, &'a str, Vec<Statement>, chumsky::extra::Default> {
-    // let ident = text::ident::<&'a str, chumsky::extra::Default>();
     let digits = text::digits(10).to_slice();
 
     let frac = just('.').then(digits);
@@ -158,7 +157,6 @@ pub fn parse<'a>() -> impl Parser<'a, &'a str, Vec<Statement>, chumsky::extra::D
         .to_slice()
         .map(|s: &str| s.parse().unwrap())
         .boxed();
-    // let op = |c| just(c).padded();
 
     let escape = just('\\')
         .then(choice((
@@ -402,7 +400,7 @@ pub fn parse<'a>() -> impl Parser<'a, &'a str, Vec<Statement>, chumsky::extra::D
             .then(bindable_group.clone())
             .then(block.clone().padded_by(text::inline_whitespace()))
             .map(|((name, args), body): ((&str, Vec<Bindable>), Vec<Statement>)| {
-                Function {
+                FunctionDefinition {
                     name: name.to_string(),
                     args: args,
                     body
