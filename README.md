@@ -61,8 +61,7 @@ set obj = ${
     $dynkey: $value2
 }
 set literal = "$var"
-# or perhaps ` ?
-set formatted = f"$var"
+set formatted = `$var`
 
 # these are builtin commands rather than syntax structures (unlike set/while etc)
 # they simply accept arguments and work with them as with any other

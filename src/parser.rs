@@ -8,10 +8,21 @@ pub struct Index {
 }
 
 #[derive(Debug, Clone)]
-pub enum Primitive {
-    Number(f64),
+pub enum FormatStringPart {
     String(String),
     Variable(String),
+    // could be globs in the future
+}
+
+#[derive(Debug, Clone)]
+pub struct FormatString {
+    values: Vec<FormatStringPart>
+}
+
+#[derive(Debug, Clone)]
+pub enum Primitive {
+    Number(f64),
+    FormatString(FormatString),
     Index(Index)
 }
 
@@ -173,7 +184,7 @@ pub fn parse<'a>() -> impl Parser<'a, &'a str, Vec<Statement>, chumsky::extra::D
         .ignored()
         .boxed();
 
-    let direct_string = none_of("$()[]{}\\\"\n;|&")
+    let direct_string = none_of("$()[]{}\\\"\n;|&<>#")
         .and_is(text::whitespace().at_least(1).not())
         .ignored()
         .or(escape.clone())
@@ -202,23 +213,32 @@ pub fn parse<'a>() -> impl Parser<'a, &'a str, Vec<Statement>, chumsky::extra::D
 
     let comment = just('#').then(any().and_is(just('\n').not()).repeated());
 
-    let empty = text::inline_whitespace().ignored()
+    let empty_block = text::whitespace().ignored()
         .or(comment.ignored())
         .or(eol.ignored());
 
     let and = just("&&");
     let or = just("||");
-    let not = just('!');
     let pipe = just('|');//.then(just('|').rewind().not());
-    // let pipe_target = just('>');
-    // let pipe_target_append = just(">>");
-    // let pipe_source = just('<');
+    let pipe_target = just(">");
+    let pipe_target_append = just(">>");
+    let pipe_source = just("<");
 
     recursive(|expr| {
+        let format_string_part = choice((
+            variable.map(|s: &str| FormatStringPart::Variable(s.to_string())),
+            string.map(FormatStringPart::String),
+        ))
+            .repeated()
+            .at_least(1)
+            .collect()
+            .map(|v| FormatString {
+                values: v
+            });
+
         let primitive = choice((
             number.map(Primitive::Number),
-            variable.map(|s: &str| Primitive::Variable(s.to_string())),
-            string.map(Primitive::String),
+            format_string_part.map(Primitive::FormatString),
         ));
 
         let group = expr.clone()
@@ -256,9 +276,12 @@ pub fn parse<'a>() -> impl Parser<'a, &'a str, Vec<Statement>, chumsky::extra::D
             .collect()
             .delimited_by(just('('), just(')'));
         
-        let block = expr.clone()
-            .or(empty.to(vec![]))
-            .delimited_by(just('{'), just('}'));
+        let block = choice((
+            expr.clone(),
+            empty_block.to(vec![]),
+        ))
+            .delimited_by(just('{'), just('}'))
+            .boxed();
 
         let cmdname = value.clone()
             .and_is(choice((
@@ -270,8 +293,7 @@ pub fn parse<'a>() -> impl Parser<'a, &'a str, Vec<Statement>, chumsky::extra::D
                 just("break"),
                 just("continue"),
                 just("return"),
-                just("fn"),
-                just("!")
+                just("fn")
             )).then(end()).not());
 
         let args = value.clone()
@@ -281,15 +303,16 @@ pub fn parse<'a>() -> impl Parser<'a, &'a str, Vec<Statement>, chumsky::extra::D
             .collect();
 
         let command = 
-            cmdname
-            .padded_by(text::inline_whitespace())
+            text::inline_whitespace().ignore_then(cmdname)
+            .then_ignore(text::inline_whitespace().at_least(1))
             .then(args)
             .map(|(name, args): (Value, Vec<Value>)| {
                 Command {
                     name: Box::new(name),
                     args: args.into_iter().map(|v| v.clone()).collect()
                 }
-            });
+            })
+            .boxed();
 
         let set = just("set")
             .then_ignore(text::inline_whitespace().at_least(1))
@@ -301,7 +324,8 @@ pub fn parse<'a>() -> impl Parser<'a, &'a str, Vec<Statement>, chumsky::extra::D
                     name: Box::new(name),
                     value: Box::new(value)
                 }
-            });
+            })
+            .boxed();
 
         let else_ = just("else")
             .then(text::inline_whitespace().at_least(1))
@@ -321,7 +345,8 @@ pub fn parse<'a>() -> impl Parser<'a, &'a str, Vec<Statement>, chumsky::extra::D
                     body,
                     else_body
                 }
-            });
+            })
+            .boxed();
 
         let while_ = just("while")
             .then_ignore(text::inline_whitespace().at_least(1))
@@ -334,7 +359,8 @@ pub fn parse<'a>() -> impl Parser<'a, &'a str, Vec<Statement>, chumsky::extra::D
                     body,
                     else_body
                 }
-            });
+            })
+            .boxed();
 
         let for_ = just("for")
             .then_ignore(text::inline_whitespace().at_least(1))
@@ -350,7 +376,8 @@ pub fn parse<'a>() -> impl Parser<'a, &'a str, Vec<Statement>, chumsky::extra::D
                     body,
                     else_body
                 }
-            });
+            })
+            .boxed();
 
         let loop_ = just("loop")
             .ignore_then(block.clone().padded_by(text::inline_whitespace()))
@@ -358,14 +385,16 @@ pub fn parse<'a>() -> impl Parser<'a, &'a str, Vec<Statement>, chumsky::extra::D
                 Loop {
                     body
                 }
-            });
+            })
+            .boxed();
 
         let return_ = just("return")
             .then_ignore(text::inline_whitespace().at_least(1))
             .ignore_then(value.clone().or_not())
             .map(|v: Option<Value>| {
                 Statement::Return(v)
-            });
+            })
+            .boxed();
 
         let function = just("fn")
             .then_ignore(text::inline_whitespace().at_least(1))
@@ -378,72 +407,86 @@ pub fn parse<'a>() -> impl Parser<'a, &'a str, Vec<Statement>, chumsky::extra::D
                     args: args,
                     body
                 }
-            });
+            })
+            .boxed();
 
-        let statement = choice((
-            set.map(Statement::Set),
+        let command = command.map(Statement::Command);
+
+        let mapable = choice((
             if_.map(Statement::If),
             while_.map(Statement::While),
             for_.map(Statement::For),
             loop_.map(Statement::Loop),
-            function.map(Statement::Function),
-            return_,
-            just("break").to(Statement::Break),
-            just("continue").to(Statement::Continue),
-            command.map(Statement::Command),
+            command,
         )).padded_by(text::inline_whitespace().ignored().or(comment.ignored())).boxed();
 
-        let not = not.repeated().at_least(1)
-            .foldr(
-                text::inline_whitespace()
-                .ignore_then(statement.clone()),
-                |_, rhs| Statement::Not(Not {
-                    value: Box::new(rhs)
-                })
-            ).boxed();
-
-        let or = statement.clone()
+        let pipe_target = mapable.clone()
             .foldl(
-            or
+            pipe_target.or(pipe_target_append)
                 .padded_by(text::inline_whitespace())
-                .ignore_then(statement.clone())
+                .ignore_then(value.clone())
                 .repeated(),
-            |lhs, rhs| Statement::Or(Or {
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs)
+            |lhs, rhs| Statement::TargetFilePipe(TargetFilePipe {
+                cmd: Some(Box::new(lhs)),
+                target: Box::new(rhs),
+                overwrite: false
             })).boxed();
 
-        let and = statement.clone()
+        let pipe_source = pipe_target.clone()
             .foldl(
-            and
+            pipe_source
                 .padded_by(text::inline_whitespace())
-                .ignore_then(statement.clone())
+                .ignore_then(value.clone())
                 .repeated(),
-            |lhs, rhs| Statement::And(And {
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs)
+            |lhs, rhs| Statement::SourceFilePipe(SourceFilePipe {
+                cmd: Some(Box::new(lhs)),
+                source: Box::new(rhs)
             })).boxed();
 
-        let pipe = statement.clone()
+        let pipe = pipe_source.clone()
             .foldl(
             pipe
                 .padded_by(text::inline_whitespace())
-                .ignore_then(statement.clone())
+                .ignore_then(pipe_source)
                 .repeated(),
             |lhs, rhs| Statement::CommandPipe(CommandPipe {
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs)
             })).boxed();
 
-        let statement_pair = choice((
-            or,
-            and,
-            not,
-            pipe,
-            statement
+        let or = pipe.clone()
+            .foldl(
+            or
+                .padded_by(text::inline_whitespace())
+                .ignore_then(pipe)
+                .repeated(),
+            |lhs, rhs| Statement::Or(Or {
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs)
+            })).boxed();
+
+        let and = or.clone()
+            .foldl(
+            and
+                .padded_by(text::inline_whitespace())
+                .ignore_then(or)
+                .repeated(),
+            |lhs, rhs| Statement::And(And {
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs)
+            })).boxed();
+
+        let statement = choice((
+            set.map(Statement::Set),
+            function.map(Statement::Function),
+            return_,
+            just("break").to(Statement::Break),
+            just("continue").to(Statement::Continue),
+            and
         ));
 
-        statement_pair
+        statement
+            .padded_by(text::inline_whitespace().ignored().or(comment.ignored()))
             .separated_by(eol.repeated().at_least(1))
             .at_least(1)
             .allow_trailing()

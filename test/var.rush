@@ -1,7 +1,6 @@
-let test = val
+set test = val
 echo var $test
-let test = $test
-echo var2 f"$test"
-echo last exit code $?
+set test = $test
+echo last exit code $status
 false
-echo last false exit code $?
+echo last false exit code $status
